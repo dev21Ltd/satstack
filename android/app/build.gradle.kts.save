@@ -1,0 +1,124 @@
+import java.util.Properties
+import java.io.FileInputStream
+
+plugins {
+    id("com.android.application")
+    id("kotlin-android")
+    id("dev.flutter.flutter-gradle-plugin")
+}
+
+android {
+    namespace = "com.dev21ltd.satstack"
+    compileSdk = 36
+    ndkVersion = flutter.ndkVersion
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
+    }
+
+    kotlinOptions {
+        jvmTarget = JavaVersion.VERSION_11.toString()
+    }
+
+    signingConfigs {
+        create("release") {
+            storeFile = file("upload-keystore.jks")
+            storePassword = ""
+            keyAlias = ""
+            keyPassword = ""
+        }
+    }
+
+    defaultConfig {
+        applicationId = "com.dev21ltd.satstack"
+        minSdk = flutter.minSdkVersion
+        targetSdk = 36
+        versionCode = flutter.versionCode
+        versionName = flutter.versionName
+        multiDexEnabled = true
+    }
+
+    buildTypes {
+        release {
+            signingConfig = signingConfigs.getByName("release")
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+        debug {
+            isMinifyEnabled = false
+            isShrinkResources = false
+            applicationIdSuffix = ".debug"
+            signingConfig = signingConfigs.getByName("debug")
+        }
+    }
+
+    packagingOptions {
+        exclude("META-INF/DEPENDENCIES")
+        exclude("META-INF/LICENSE")
+        exclude("META-INF/LICENSE.txt")
+        exclude("META-INF/license.txt")
+        exclude("META-INF/NOTICE")
+        exclude("META-INF/NOTICE.txt")
+        exclude("META-INF/notice.txt")
+        exclude("META-INF/ASL2.0")
+        exclude("META-INF/*.kotlin_module")
+        exclude("META-INF/proguard/androidx-annotations.pro")
+        exclude("META-INF/INDEX.LIST")
+        exclude("META-INF/io.netty.versions.properties")
+        pickFirst("**/*.so")
+        pickFirst("META-INF/services/javax.annotation.processing.Processor")
+    }
+
+    buildFeatures {
+        viewBinding = true
+    }
+
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
+        disable.addAll(listOf("InvalidPackage", "MissingTranslation", "ExtraTranslation"))
+    }
+}
+
+flutter {
+    source = "../.."
+}
+
+dependencies {
+    implementation("androidx.multidex:multidex:2.0.1")
+    implementation("com.google.crypto.tink:tink-android:1.12.0")
+    implementation("com.google.errorprone:error_prone_annotations:2.24.1")
+    implementation("javax.annotation:javax.annotation-api:1.3.2")
+    implementation("androidx.annotation:annotation:1.8.0")
+    implementation("com.google.protobuf:protobuf-javalite:3.25.3")
+    implementation("com.google.android.gms:play-services-basement:18.3.0")
+    implementation("androidx.core:core-ktx:1.12.0")
+    implementation("androidx.appcompat:appcompat:1.6.1")
+    implementation("com.google.android.material:material:1.11.0")
+    implementation("androidx.constraintlayout:constraintlayout:2.1.4")
+    implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.0")
+    implementation("androidx.activity:activity-ktx:1.8.2")
+    implementation("androidx.fragment:fragment-ktx:1.6.2")
+    implementation("androidx.core:core:1.12.0")
+}
+
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+
+if (keystorePropertiesFile.exists()) {
+    val keystoreProperties = Properties().apply {
+        load(FileInputStream(keystorePropertiesFile))
+    }
+
+    android.signingConfigs.getByName("release").apply {
+        storeFile = file(keystoreProperties.getProperty("storeFile") ?: "")
+        storePassword = keystoreProperties.getProperty("storePassword") ?: ""
+        keyAlias = keystoreProperties.getProperty("keyAlias") ?: ""
+        keyPassword = keystoreProperties.getProperty("keyPassword") ?: ""
+    }
+}
+
