@@ -265,7 +265,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     ));
   }
 
-  void _addTransaction(AppState appState) {
+  // MODIFIED: Now async to await appState methods
+  Future<void> _addTransaction(AppState appState) async {
     final amountText = _amountController.text.trim();
     final manualPrice = double.tryParse(_priceController.text.trim());
     double amountBTC;
@@ -283,16 +284,28 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Please enter a valid price in ${currencyToString(appState.selectedCurrency)}')));
       return;
     }
-    if (_isPurchaseMode) {
-      appState.addPurchase(amountBTC, manualPrice);
-    } else {
-      if (amountBTC > appState.totalBTC) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Not enough BTC to sell. Available: ${appState.formatBtcAmount(appState.totalBTC)}')));
-        return;
+
+    try {
+      if (_isPurchaseMode) {
+        await appState.addPurchase(amountBTC, manualPrice);
+      } else {
+        if (amountBTC > appState.totalBTC) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Not enough BTC to sell. Available: ${appState.formatBtcAmount(appState.totalBTC)}')));
+          return;
+        }
+        await appState.addSale(amountBTC, manualPrice);
       }
-      appState.addSale(amountBTC, manualPrice);
+      _amountController.clear();
+      _priceController.clear();
+      _showSuccessAnimation(_isPurchaseMode ? 'Purchase Added!' : 'Sale Added!');
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed: ${e.toString().replaceFirst('Exception: ', '')}'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
-    _amountController.clear(); _priceController.clear();
   }
 
   Future<void> _pickDate(AppState appState) async {
@@ -688,7 +701,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
                         children: [
                           const SizedBox(height: 4),
                           ElevatedButton.icon(
-                            onPressed: () => _addTransaction(appState),
+                            onPressed: () => _addTransaction(appState), // now async
                             style: ElevatedButton.styleFrom(
                               backgroundColor: _isPurchaseMode ? Colors.green : Colors.red,
                               foregroundColor: Colors.white,
@@ -1411,9 +1424,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     ]);
   }
 
+  // UPDATED: Golden angle color generation for distinct yearly colors
   Color _getColorForYear(int year) {
-    final colors = [Colors.blue, Colors.green, Colors.orange, Colors.purple, Colors.red, Colors.teal, Colors.pink, Colors.indigo, Colors.amber, Colors.cyan, Colors.lightBlue, Colors.lightGreen, Colors.deepOrange, Colors.deepPurple, Colors.brown, Colors.blueGrey];
-    return colors[year % colors.length];
+    // Use golden angle (137.5 degrees) to generate distinct hues.
+    // This spreads colors evenly around the color wheel.
+    double hue = (year * 137.5) % 360;
+    return HSVColor.fromAHSV(1.0, hue, 0.8, 0.8).toColor();
   }
 
   @override void didChangeAppLifecycleState(AppLifecycleState state) {

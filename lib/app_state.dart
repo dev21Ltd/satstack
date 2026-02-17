@@ -290,6 +290,7 @@ class AppState with ChangeNotifier {
     } catch (e) {
       _lastError = 'Failed to save purchases: ${e.toString()}';
       notifyListeners();
+      throw Exception(_lastError);
     }
   }
 
@@ -299,6 +300,7 @@ class AppState with ChangeNotifier {
     } catch (e) {
       _lastError = 'Failed to save sales: ${e.toString()}';
       notifyListeners();
+      throw Exception(_lastError);
     }
   }
 
@@ -405,7 +407,8 @@ class AppState with ChangeNotifier {
     }
   }
 
-  void addPurchase(double amountBTC, double pricePerBTC) {
+  // MODIFIED: Now async and throws on failure
+  Future<void> addPurchase(double amountBTC, double pricePerBTC) async {
     try {
       final newPurchase = Purchase(
         date: _selectedDate,
@@ -414,36 +417,38 @@ class AppState with ChangeNotifier {
         cashCurrency: _selectedCurrency,
       );
       _purchases = [..._purchases, newPurchase];
-      _savePurchases();
+      await _savePurchases();
       notifyListeners();
     } catch (e) {
       _lastError = 'Failed to add purchase: ${e.toString()}';
       notifyListeners();
+      throw Exception(_lastError);
     }
   }
 
-  // FIXED: Add sale with proper currency handling
-  void addSale(double amount, double manualPrice) {
+  // MODIFIED: Now async and throws on failure
+  Future<void> addSale(double amount, double manualPrice) async {
     try {
       if (amount > totalBTC) {
         _lastError = 'Not enough BTC to sell';
         notifyListeners();
-        return;
+        throw Exception(_lastError);
       }
 
       final newSale = Sale(
         date: _selectedDate,
         amountBTC: amount,
         price: manualPrice,
-        originalCurrency: _selectedCurrency, // Store the actual selected currency
+        originalCurrency: _selectedCurrency,
       );
 
       _sales = [..._sales, newSale];
-      _saveSales();
+      await _saveSales();
       notifyListeners();
     } catch (e) {
       _lastError = 'Failed to add sale: ${e.toString()}';
       notifyListeners();
+      throw Exception(_lastError);
     }
   }
 
