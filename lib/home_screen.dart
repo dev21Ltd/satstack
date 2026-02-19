@@ -17,6 +17,8 @@ import 'widgets.dart';
 import 'services.dart';
 import 'donation_widget.dart';
 import 'import_export_widget.dart';
+// ADDED: Import for URL launcher
+import 'package:url_launcher/url_launcher.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -367,14 +369,39 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
           IconButton(icon: Icon(Icons.favorite, color: const Color(0xFFF7931A)), onPressed: () => DonationWidget.showDonationDialog(context, appState.isDarkMode), tooltip: 'Support Development'),
           IconButton(icon: Icon(appState.holdingsHidden ? Icons.visibility_off : Icons.visibility), onPressed: () => appState.toggleHoldingsVisibility(), tooltip: appState.holdingsHidden ? 'Show Holdings' : 'Hide Holdings'),
           IconButton(icon: const Icon(Icons.import_export), onPressed: _showImportExportDialog),
+          // MODIFIED: Added privacy and terms menu items
           PopupMenuButton<String>(
-            icon: const Icon(Icons.settings), onSelected: (value) {
-            if (value == 'currency') _showCurrencySettings(appState);
-            if (value == 'security') _showSecuritySettings(appState);
-          }, itemBuilder: (BuildContext context) => [
-            const PopupMenuItem<String>(value: 'currency', child: Text('Currency Settings')),
-            const PopupMenuItem<String>(value: 'security', child: Text('Security Settings')),
-          ],
+            icon: const Icon(Icons.settings),
+            onSelected: (value) async {
+              if (value == 'currency') _showCurrencySettings(appState);
+              if (value == 'security') _showSecuritySettings(appState);
+              if (value == 'privacy') {
+                final Uri url = Uri.parse('https://github.com/dev21Ltd/satstack/blob/master/PRIVACY.md');
+                if (await canLaunchUrl(url)) {
+                  await launchUrl(url, mode: LaunchMode.externalApplication);
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Could not open link')),
+                  );
+                }
+              }
+              if (value == 'terms') {
+                final Uri url = Uri.parse('https://github.com/dev21Ltd/satstack/blob/master/TERMS.md');
+                if (await canLaunchUrl(url)) {
+                  await launchUrl(url, mode: LaunchMode.externalApplication);
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Could not open link')),
+                  );
+                }
+              }
+            },
+            itemBuilder: (BuildContext context) => [
+              const PopupMenuItem<String>(value: 'currency', child: Text('Currency Settings')),
+              const PopupMenuItem<String>(value: 'security', child: Text('Security Settings')),
+              const PopupMenuItem<String>(value: 'privacy', child: Text('Privacy Policy')),
+              const PopupMenuItem<String>(value: 'terms', child: Text('Terms of Service')),
+            ],
           ),
           IconButton(icon: Icon(appState.isDarkMode ? Icons.light_mode : Icons.dark_mode), onPressed: () => appState.toggleTheme(!appState.isDarkMode)),
         ],
