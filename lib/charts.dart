@@ -173,6 +173,20 @@ class _PortfolioChartState extends State<PortfolioChart>
           btcAmount: _totalBTC));
     }
 
+    // ----- FIX: deduplicate by calendar date (ignore time) -----
+    final Map<DateTime, PortfolioDataPoint> uniqueByDate = {};
+    for (final point in _portfolioData) {
+      final key = DateTime(point.date.year, point.date.month, point.date.day);
+      // Keep the point with the later time (or last in list)
+      if (!uniqueByDate.containsKey(key) ||
+          point.date.isAfter(uniqueByDate[key]!.date)) {
+        uniqueByDate[key] = point;
+      }
+    }
+    _portfolioData = uniqueByDate.values.toList()
+      ..sort((a, b) => a.date.compareTo(b.date));
+    // ----------------------------------------------------------
+
     _calculateMinMaxValues();
     setState(() {});
   }
