@@ -52,15 +52,12 @@ class _DonationDialogState extends State<DonationDialog> with SingleTickerProvid
       backgroundColor: widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.0)),
       insetPadding: const EdgeInsets.all(16.0),
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxHeight: screenHeight * 0.85,
-          maxWidth: screenWidth * 0.95,
-        ),
+      child: SizedBox(
+        height: screenHeight * 0.85,
+        width: screenWidth * 0.95,
         child: Padding(
           padding: const EdgeInsets.all(16.0),
           child: Column(
-            mainAxisSize: MainAxisSize.min,
             children: [
               Text(
                 'Support Development',
@@ -87,12 +84,13 @@ class _DonationDialogState extends State<DonationDialog> with SingleTickerProvid
                   labelColor: Colors.black,
                   unselectedLabelColor: widget.isDarkMode ? Colors.white70 : Colors.black54,
                   labelStyle: TextStyle(
-                    fontSize: isSmallScreen ? 12 : 14,
+                    fontSize: isSmallScreen ? 11 : 14,
                     fontWeight: FontWeight.w600,
                   ),
                   unselectedLabelStyle: TextStyle(
-                    fontSize: isSmallScreen ? 12 : 14,
+                    fontSize: isSmallScreen ? 11 : 14,
                   ),
+                  labelPadding: const EdgeInsets.symmetric(horizontal: 8),
                   indicatorSize: TabBarIndicatorSize.tab,
                   tabs: const [
                     Tab(text: 'Lightning'),

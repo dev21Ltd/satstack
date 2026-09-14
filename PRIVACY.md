@@ -1,41 +1,38 @@
 # Privacy Policy for SatStack
 
-**Last Updated:** February 11, 2026
+**Last Updated:** September 14, 2026
 
 ## Our Promise
-SatStack collects **ZERO** data. Your portfolio data stays exclusively on your device.
+SatStack collects **ZERO** personal data. Your portfolio stays on your device.
 
 ## What We Don't Collect
-- ❌ No personal information
-- ❌ No portfolio data
-- ❌ No transaction history
-- ❌ No device identifiers
-- ❌ No location data
-- ❌ No analytics or tracking
-- ❌ No crash reports (unless you opt-in)
+- No personal information
+- No portfolio data sent to us
+- No transaction history uploaded
+- No device identifiers
+- No location data
+- No analytics or tracking
+- No crash reports
 
-## Local Storage Only
-All data is encrypted and stored locally using:
-- AES-256 encryption via Flutter Secure Storage
-- Device-specific encryption keys
-- No cloud backup or synchronization
+## Local Storage
+- Trade data is stored in Hive boxes encrypted with AES (HiveAesCipher).
+- The Hive key is kept in the device keystore via Flutter Secure Storage.
+- When a PIN is set, that Hive key is wrapped with the PIN (and recovery answer). Boxes are not opened until unlock.
+- Optional PIN is a lock **and** wraps the disk key. It is not a substitute for full-disk encryption of the phone.
+
+## Exports
+- JSON, CSV, and PDF exports are **plaintext**. Anyone with those files can read your trades. Treat them like financial documents.
 
 ## External Services
-We only use CoinGecko API for Bitcoin price data. No user data is transmitted.
+CoinGecko HTTPS is used only for Bitcoin prices. No portfolio data is sent. Android connections to `api.coingecko.com` check the TLS certificate (leaf pin plus Google Trust Services WE1 issuer).
 
 ## Your Rights
-- **Export**: Export all data anytime via CSV/PDF/JSON
-- **Delete**: Uninstall app = all data deleted
-- **Inspect**: View source code for verification
-
-## Open Source Transparency
-SatStack is open source: https://github.com/dev21Ltd/satstack
+- Export data anytime (JSON, CSV, or PDF)
+- Uninstall deletes local app data
+- Inspect the source: https://github.com/dev21Ltd/satstack
 
 ## Contact
-For privacy questions: Open an issue on GitHub
-
-## Changes
-We will notify users of changes via GitHub repository updates.
+Open an issue on GitHub.
 
 ---
-*Not financial advice. Always secure your own private keys.*
+*Not financial advice. Always secure your own Bitcoin keys.*

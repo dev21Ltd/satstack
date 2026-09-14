@@ -1,4 +1,3 @@
-// services.dart - COMPLETE FIXED VERSION WITH PROPER MIGRATION
 import 'package:flutter/material.dart';
 import 'package:hive/hive.dart';
 import 'dart:convert';
@@ -6,7 +5,6 @@ import 'package:http/http.dart' as http;
 import 'package:share_plus/share_plus.dart';
 import 'models.dart';
 import 'constants.dart';
-import 'dart:io';
 import 'security_service.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -16,12 +14,13 @@ import 'dart:async';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 import 'package:csv/csv.dart';
 import 'package:intl/intl.dart';
-import 'dart:ui';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter/services.dart';
 import 'package:open_file/open_file.dart';
-
-final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+import 'package:cross_file/cross_file.dart';
+import 'app_keys.dart';
+import 'hive_boxes.dart';
+import 'platform/local_fs.dart';
+import 'platform/pinned_http.dart';
 
 class RateLimitException implements Exception {
   @override String toString() => 'Rate limit exceeded';
@@ -44,72 +43,158 @@ class ApiException implements Exception {
   @override String toString() => 'API error: $message (Status code: $statusCode)';
 }
 
+class ImportCancelledException implements Exception {
+  @override
+  String toString() => 'Import cancelled';
+}
+
+class SaveCancelledException implements Exception {
+  @override
+  String toString() => 'Save cancelled';
+}
+
 class ApiService {
+  static const _userAgent = 'SatStack/1.0.1 (https://github.com/dev21Ltd/satstack)';
+
+  static Future<T> _withRetry<T>(Future<T> Function() action) async {
+    var delay = const Duration(seconds: 2);
+    Object? last;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await action();
+      } on RateLimitException catch (e) {
+        last = e;
+        await Future<void>.delayed(delay);
+        delay *= 2;
+      }
+    }
+    throw last ?? RateLimitException();
+  }
+
+  static Future<PinnedHttpResponse> _get(Uri uri, {Duration timeout = const Duration(seconds: 15)}) {
+    return pinnedGet(
+      uri,
+      headers: {'User-Agent': _userAgent},
+      timeout: timeout,
+    );
+  }
+
   static Future<Map<String, double>> fetchBtcPrices() async {
     try {
-      final response = await http.get(
-        Uri.parse('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd,gbp,eur,cad,aud,jpy,cny'),
-        headers: {'User-Agent': 'YourApp/1.0'},
-      ).timeout(const Duration(seconds: 10));
+      return await _withRetry(() async {
+        final response = await _get(
+          Uri.parse('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd,gbp,eur,cad,aud,jpy,cny'),
+          timeout: const Duration(seconds: 10),
+        );
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return {
-          'usd': (data['bitcoin']['usd'] as num).toDouble(),
-          'gbp': (data['bitcoin']['gbp'] as num).toDouble(),
-          'eur': (data['bitcoin']['eur'] as num).toDouble(),
-          'cad': (data['bitcoin']['cad'] as num).toDouble(),
-          'aud': (data['bitcoin']['aud'] as num).toDouble(),
-          'jpy': (data['bitcoin']['jpy'] as num).toDouble(),
-          'cny': (data['bitcoin']['cny'] as num).toDouble(),
-        };
-      } else if (response.statusCode == 429) {
-        throw RateLimitException();
-      } else {
-        throw ApiException('API returned status code: ${response.statusCode}', response.statusCode);
-      }
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          return {
+            'usd': (data['bitcoin']['usd'] as num).toDouble(),
+            'gbp': (data['bitcoin']['gbp'] as num).toDouble(),
+            'eur': (data['bitcoin']['eur'] as num).toDouble(),
+            'cad': (data['bitcoin']['cad'] as num).toDouble(),
+            'aud': (data['bitcoin']['aud'] as num).toDouble(),
+            'jpy': (data['bitcoin']['jpy'] as num).toDouble(),
+            'cny': (data['bitcoin']['cny'] as num).toDouble(),
+          };
+        } else if (response.statusCode == 429) {
+          throw RateLimitException();
+        } else {
+          throw ApiException('API returned status code: ${response.statusCode}', response.statusCode);
+        }
+      });
+    } on TlsPinException catch (e) {
+      throw NetworkException(e.toString());
     } on http.ClientException catch (e) {
       throw NetworkException('Network error: ${e.message}');
     } on TimeoutException catch (_) {
       throw ApiTimeoutException();
     } catch (e) {
+      if (e is RateLimitException || e is ApiException || e is NetworkException) rethrow;
       throw ApiException('Failed to load BTC prices: ${e.toString()}', -1);
     }
   }
 
   static Future<List<PriceDataPoint>> fetchHistoricalData(String currency, int days) async {
     try {
-      final response = await http.get(
-        Uri.parse('https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=${currency.toLowerCase()}&days=$days'),
-        headers: {'User-Agent': 'YourApp/1.0'},
-      ).timeout(const Duration(seconds: 30));
+      return await _withRetry(() async {
+        final response = await _get(
+          Uri.parse('https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=${currency.toLowerCase()}&days=$days'),
+          timeout: const Duration(seconds: 30),
+        );
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final prices = data['prices'] as List;
-        return prices.map((e) {
-          return PriceDataPoint(
-            DateTime.fromMillisecondsSinceEpoch(e[0]),
-            (e[1] as num).toDouble(),
-          );
-        }).toList();
-      } else {
-        throw ApiException('API returned status code: ${response.statusCode}', response.statusCode);
-      }
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          final prices = data['prices'] as List;
+          return prices.map((e) {
+            return PriceDataPoint(
+              DateTime.fromMillisecondsSinceEpoch(e[0]),
+              (e[1] as num).toDouble(),
+            );
+          }).toList();
+        } else if (response.statusCode == 429) {
+          throw RateLimitException();
+        } else {
+          throw ApiException('API returned status code: ${response.statusCode}', response.statusCode);
+        }
+      });
+    } on TlsPinException catch (e) {
+      throw NetworkException(e.toString());
     } on TimeoutException catch (_) {
       throw ApiTimeoutException();
     } catch (e) {
+      if (e is RateLimitException || e is ApiException || e is NetworkException) rethrow;
       throw ApiException('Failed to load historical data: ${e.toString()}', -1);
     }
   }
 }
 
 class StorageService {
+  static const _cachedPricesKey = 'cachedBtcPrices';
+  static const _cachedPricesAtKey = 'cachedBtcPricesAt';
+
+  Future<Box> _purchasesBox() async {
+    final key = await SecurityService().getEncryptionKey();
+    return HiveBoxes.purchasesBox(key);
+  }
+
+  Future<Box> _salesBox() async {
+    final key = await SecurityService().getEncryptionKey();
+    return HiveBoxes.salesBox(key);
+  }
+
+  static Future<void> saveCachedBtcPrices(Map<String, double> prices) async {
+    if (!Hive.isBoxOpen(HiveBoxes.preferences)) return;
+    final box = Hive.box(HiveBoxes.preferences);
+    await box.put(_cachedPricesKey, prices);
+    await box.put(_cachedPricesAtKey, DateTime.now().toIso8601String());
+  }
+
+  static Map<String, double>? loadCachedBtcPrices() {
+    if (!Hive.isBoxOpen(HiveBoxes.preferences)) return null;
+    final raw = Hive.box(HiveBoxes.preferences).get(_cachedPricesKey);
+    if (raw is! Map) return null;
+    final prices = <String, double>{};
+    raw.forEach((key, value) {
+      if (value is num) {
+        prices[key.toString()] = value.toDouble();
+      }
+    });
+    return prices.isEmpty ? null : prices;
+  }
+
+  static DateTime? loadCachedBtcPricesAt() {
+    if (!Hive.isBoxOpen(HiveBoxes.preferences)) return null;
+    final raw = Hive.box(HiveBoxes.preferences).get(_cachedPricesAtKey);
+    if (raw is! String) return null;
+    return DateTime.tryParse(raw);
+  }
+
   Future<List<Purchase>> loadPurchases() async {
     try {
-      final encryptionKey = await SecurityService().getEncryptionKey();
-      final box = await Hive.openBox('btc_purchases', encryptionKey: encryptionKey);
-      final rawList = box.get('purchases', defaultValue: <dynamic>[]);
+      final box = await _purchasesBox();
+      final rawList = box.get(HiveBoxes.purchasesKey, defaultValue: <dynamic>[]);
       final purchases = rawList.map<Purchase>((item) => Purchase.fromMap(Map<String, dynamic>.from(item))).toList();
       print('Loaded ${purchases.length} purchases from storage');
       return purchases;
@@ -122,7 +207,7 @@ class StorageService {
   // FIXED: Use FilePicker.saveFile with bytes parameter - Google Play compliant
   // NEW: Automatically saves to app's "My Files" storage in addition to user-selected location
   Future<String> saveFileToLocation(Uint8List bytes, String fileName) async {
-    String? externalSaveResult;
+    String externalSaveResult = '';
 
     try {
       if (kIsWeb) {
@@ -141,16 +226,15 @@ class StorageService {
           // FilePicker automatically saves the file when bytes are provided
           externalSaveResult = 'File saved to: $outputFile';
         } else {
-          // User canceled the operation
-          externalSaveResult = 'Save operation canceled';
+          throw SaveCancelledException();
         }
       }
     } catch (e) {
+      if (e is SaveCancelledException) rethrow;
       print('Error saving file to external location: $e');
       externalSaveResult = 'External save failed: ${e.toString()}';
     }
 
-    // NEW: ALWAYS save a copy to app's internal "My Files" storage
     String internalSaveResult;
     try {
       internalSaveResult = await _saveToAppStorage(bytes, fileName);
@@ -159,26 +243,24 @@ class StorageService {
       internalSaveResult = 'App storage save failed: ${e.toString()}';
     }
 
-    // Combine results
-    if (externalSaveResult != null && externalSaveResult.contains('saved to:')) {
+    if (externalSaveResult.contains('saved to:')) {
       return '$externalSaveResult | $internalSaveResult';
-    } else {
-      return internalSaveResult; // Return app storage result if external failed or was canceled
     }
+    return internalSaveResult;
   }
 
   // NEW: Helper method to always save files to app storage for "My Files" functionality
   Future<String> _saveToAppStorage(Uint8List bytes, String fileName) async {
+    if (kIsWeb) {
+      return 'Download started: $fileName';
+    }
     try {
       final directory = await getApplicationDocumentsDirectory();
-      final stackTrackDir = Directory('${directory.path}/SatStack');
-      if (!await stackTrackDir.exists()) {
-        await stackTrackDir.create(recursive: true);
-      }
+      final stackTrackDir = '${directory.path}/SatStack';
+      await ensureDir(stackTrackDir);
 
-      final internalPath = '${stackTrackDir.path}/$fileName';
-      final File file = File(internalPath);
-      await file.writeAsBytes(bytes, flush: true);
+      final internalPath = '$stackTrackDir/$fileName';
+      await writeBytesToPath(internalPath, bytes);
 
       print('File automatically saved to app storage: $internalPath');
       return 'File saved to app storage: $internalPath';
@@ -191,9 +273,8 @@ class StorageService {
   // UPDATED: Load sales with migration support
   Future<List<Sale>> loadSales() async {
     try {
-      final encryptionKey = await SecurityService().getEncryptionKey();
-      final box = await Hive.openBox('btc_sales', encryptionKey: encryptionKey);
-      final rawList = box.get('sales', defaultValue: <dynamic>[]);
+      final box = await _salesBox();
+      final rawList = box.get(HiveBoxes.salesKey, defaultValue: <dynamic>[]);
       final sales = rawList.map<Sale>((item) => Sale.fromMap(Map<String, dynamic>.from(item))).toList();
       print('Loaded ${sales.length} sales from storage');
       return sales;
@@ -265,9 +346,8 @@ class StorageService {
 
   Future<void> savePurchases(List<Purchase> purchases) async {
     try {
-      final encryptionKey = await SecurityService().getEncryptionKey();
-      final box = await Hive.openBox('btc_purchases', encryptionKey: encryptionKey);
-      await box.put('purchases', purchases.map((p) => p.toMap()).toList());
+      final box = await _purchasesBox();
+      await box.put(HiveBoxes.purchasesKey, purchases.map((p) => p.toMap()).toList());
       print('Saved ${purchases.length} purchases to storage');
     } catch (e) {
       print('Error saving purchases: $e');
@@ -277,9 +357,8 @@ class StorageService {
 
   Future<void> saveSales(List<Sale> sales) async {
     try {
-      final encryptionKey = await SecurityService().getEncryptionKey();
-      final box = await Hive.openBox('btc_sales', encryptionKey: encryptionKey);
-      await box.put('sales', sales.map((s) => s.toMap()).toList());
+      final box = await _salesBox();
+      await box.put(HiveBoxes.salesKey, sales.map((s) => s.toMap()).toList());
       print('Saved ${sales.length} sales to storage');
     } catch (e) {
       print('Error saving sales: $e');
@@ -318,6 +397,8 @@ class StorageService {
       } else if (format == 'json') {
         await _exportToJson(purchases, sales, preferencesBox, shareAfterSave);
       }
+    } on SaveCancelledException {
+      rethrow;
     } catch (e) {
       throw Exception('Failed to export data: $e');
     }
@@ -358,37 +439,19 @@ class StorageService {
     final fileName = 'satstack_portfolio_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.csv';
 
     if (shareAfterSave) {
-      final tempDir = await getTemporaryDirectory();
-      final tempFile = File('${tempDir.path}/$fileName');
-      await tempFile.writeAsBytes(bytes);
-      await Share.shareXFiles([XFile(tempFile.path)], text: 'SatStack Portfolio Export - ${DateFormat('yyyy-MM-dd').format(DateTime.now())}');
-
-      // NEW: Also save to app storage when sharing
-      await _saveToAppStorage(Uint8List.fromList(bytes), fileName);
+      await _shareBytes(
+        Uint8List.fromList(bytes),
+        fileName,
+        'SatStack Portfolio Export - ${DateFormat('yyyy-MM-dd').format(DateTime.now())}',
+      );
     } else {
       // Use the new saveFileToLocation method which automatically saves to app storage
-      final result = await saveFileToLocation(Uint8List.fromList(bytes), fileName);
-
-      if (result.contains('saved to:') || result.contains('app storage')) {
-        Future.microtask(() {
-          final context = navigatorKey.currentContext;
-          if (context != null) {
-            ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                    content: Text('CSV file saved successfully!'),
-                    backgroundColor: Colors.green,
-                    duration: Duration(seconds: 4)
-                )
-            );
-          }
-        });
-      }
+      await saveFileToLocation(Uint8List.fromList(bytes), fileName);
     }
   }
 
   Future<void> _exportToPdf(List<Purchase> purchases, List<Sale> sales, bool shareAfterSave) async {
     final PdfDocument document = PdfDocument();
-    final List<PdfPage> pages = [];
     PdfPage currentPage = document.pages.add();
     PdfGraphics graphics = currentPage.graphics;
     final PdfFont font = PdfStandardFont(PdfFontFamily.helvetica, 12);
@@ -446,31 +509,14 @@ class StorageService {
     final fileName = 'satstack_portfolio_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.pdf';
 
     if (shareAfterSave) {
-      final tempDir = await getTemporaryDirectory();
-      final tempFile = File('${tempDir.path}/$fileName');
-      await tempFile.writeAsBytes(bytes);
-      await Share.shareXFiles([XFile(tempFile.path)], text: 'StackTrack Portfolio Export - ${DateFormat('yyyy-MM-dd').format(DateTime.now())}');
-
-      // NEW: Also save to app storage when sharing
-      await _saveToAppStorage(Uint8List.fromList(bytes), fileName);
+      await _shareBytes(
+        Uint8List.fromList(bytes),
+        fileName,
+        'SatStack Portfolio Export - ${DateFormat('yyyy-MM-dd').format(DateTime.now())}',
+      );
     } else {
       // Use the new saveFileToLocation method which automatically saves to app storage
-      final result = await saveFileToLocation(Uint8List.fromList(bytes), fileName);
-
-      if (result.contains('saved to:') || result.contains('app storage')) {
-        Future.microtask(() {
-          final context = navigatorKey.currentContext;
-          if (context != null) {
-            ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                    content: Text('PDF file saved successfully!'),
-                    backgroundColor: Colors.green,
-                    duration: Duration(seconds: 4)
-                )
-            );
-          }
-        });
-      }
+      await saveFileToLocation(Uint8List.fromList(bytes), fileName);
     }
   }
 
@@ -531,15 +577,15 @@ class StorageService {
 
   Future<void> _exportToJson(List<Purchase> purchases, List<Sale> sales, Box preferencesBox, bool shareAfterSave) async {
     final jsonData = {
-      'version': 3, // Updated version for new sales format
+      'version': 3,
       'exportDate': DateTime.now().toIso8601String(),
       'purchases': purchases.map((p) => p.toMap()).toList(),
       'sales': sales.map((s) => s.toMap()).toList(),
       'preferences': {
-        'isDarkMode': preferencesBox.get('isDarkMode', defaultValue: true),
-        'favoriteCurrency': preferencesBox.get('favoriteCurrency', defaultValue: 0),
-        'secondaryCurrency': preferencesBox.get('secondaryCurrency', defaultValue: 1),
-        'denomination': preferencesBox.get('denomination', defaultValue: 0),
+        'isDarkMode': preferencesBox.get('isDarkMode', defaultValue: true) == true,
+        'favoriteCurrency': (preferencesBox.get('favoriteCurrency', defaultValue: 0) as num).toInt(),
+        'secondaryCurrency': (preferencesBox.get('secondaryCurrency', defaultValue: 1) as num).toInt(),
+        'denomination': (preferencesBox.get('denomination', defaultValue: 0) as num).toInt(),
       }
     };
     final jsonString = jsonEncode(jsonData);
@@ -549,35 +595,20 @@ class StorageService {
     if (kIsWeb) {
       final blob = html.Blob([bytes], 'application/json');
       final url = html.Url.createObjectUrlFromBlob(blob);
-      final anchor = html.AnchorElement(href: url)..setAttribute('download', fileName)..click();
+      html.AnchorElement(href: url)
+        ..setAttribute('download', fileName)
+        ..click();
       html.Url.revokeObjectUrl(url);
     } else {
       if (shareAfterSave) {
-        final tempDir = await getTemporaryDirectory();
-        final tempFile = File('${tempDir.path}/$fileName');
-        await tempFile.writeAsBytes(bytes);
-        await Share.shareXFiles([XFile(tempFile.path)], text: 'SatStack Backup - ${DateFormat('yyyy-MM-dd').format(DateTime.now())}');
-
-        // NEW: Also save to app storage when sharing
-        await _saveToAppStorage(Uint8List.fromList(bytes), fileName);
+        await _shareBytes(
+          Uint8List.fromList(bytes),
+          fileName,
+          'SatStack Backup - ${DateFormat('yyyy-MM-dd').format(DateTime.now())}',
+        );
       } else {
         // Use the new saveFileToLocation method which automatically saves to app storage
-        final result = await saveFileToLocation(Uint8List.fromList(bytes), fileName);
-
-        if (result.contains('saved to:') || result.contains('app storage')) {
-          Future.microtask(() {
-            final context = navigatorKey.currentContext;
-            if (context != null) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                      content: Text('JSON backup saved successfully!'),
-                      backgroundColor: Colors.green,
-                      duration: Duration(seconds: 4)
-                  )
-              );
-            }
-          });
-        }
+        await saveFileToLocation(Uint8List.fromList(bytes), fileName);
       }
     }
   }
@@ -597,24 +628,21 @@ class StorageService {
       for (int i = 0; i < csvData.length; i++) {
         final row = csvData[i];
         if (row.isEmpty) continue;
-        if (_isHeaderRow(row)) continue;
+        if (_isHeaderRow(row) || _isSummaryRow(row)) continue;
         try {
           final purchase = _parsePurchaseFromRow(row);
           if (purchase != null) {
             purchases.add(purchase);
-            print('Successfully parsed purchase: ${purchase.amountBTC} BTC on ${purchase.date}');
             continue;
           }
-        } catch (e) { print('Failed to parse row $i as purchase: $e'); }
+        } catch (_) {}
         try {
           final sale = _parseSaleFromRow(row);
           if (sale != null) {
             sales.add(sale);
-            print('Successfully parsed sale: ${sale.amountBTC} BTC on ${sale.date}');
             continue;
           }
-        } catch (e) { print('Failed to parse row $i as sale: $e'); }
-        print('Could not parse row $i: $row');
+        } catch (_) {}
       }
       print('Successfully parsed ${purchases.length} purchases and ${sales.length} sales');
       if (purchases.isNotEmpty || sales.isNotEmpty) {
@@ -638,7 +666,26 @@ class StorageService {
   bool _isHeaderRow(List<dynamic> row) {
     if (row.isEmpty) return false;
     final firstCell = row[0].toString().toLowerCase();
-    return firstCell.contains('stacktrack') || firstCell.contains('export') || firstCell.contains('type') || firstCell.contains('date') && firstCell.contains('amount') || firstCell.contains('purchase') && firstCell.contains('sale');
+    return firstCell.contains('satstack') ||
+        firstCell.contains('stacktrack') ||
+        firstCell.contains('export') ||
+        firstCell.contains('type') ||
+        (firstCell.contains('date') && firstCell.contains('amount')) ||
+        (firstCell.contains('purchase') && firstCell.contains('sale'));
+  }
+
+  bool _isSummaryRow(List<dynamic> row) {
+    if (row.isEmpty) return false;
+    final firstCell = row[0].toString().toLowerCase().trim();
+    return firstCell == 'purchases' ||
+        firstCell == 'sales' ||
+        firstCell.contains('portfolio summary') ||
+        firstCell.contains('total purchases') ||
+        firstCell.contains('total sales') ||
+        firstCell.contains('total btc') ||
+        firstCell.contains('total investment') ||
+        firstCell.contains('average purchase') ||
+        firstCell.contains('export date');
   }
 
   Purchase? _parsePurchaseFromRow(List<dynamic> row) {
@@ -829,8 +876,10 @@ class StorageService {
           await importDataFromJsonString(fileContent);
         }
       } else {
-        throw Exception('No file selected');
+        throw ImportCancelledException();
       }
+    } on ImportCancelledException {
+      rethrow;
     } catch (e) {
       print('Import error: $e');
       throw Exception('Failed to import data: ${e.toString()}');
@@ -838,8 +887,11 @@ class StorageService {
   }
 
   Future<String> _readFileContent(PlatformFile file) async {
-    if (kIsWeb) return String.fromCharCodes(file.bytes!);
-    else return await File(file.path!).readAsString();
+    if (kIsWeb || file.path == null) {
+      if (file.bytes == null) throw Exception('Unable to read selected file');
+      return String.fromCharCodes(file.bytes!);
+    }
+    return readStringFromPath(file.path!);
   }
 
   bool _looksLikeJson(String content) {
@@ -860,7 +912,11 @@ class StorageService {
 
   Future<void> importDataFromJsonString(String jsonString) async {
     try {
-      Map<String, dynamic> data = jsonDecode(jsonString);
+      final decoded = jsonDecode(jsonString);
+      if (decoded is! Map) {
+        throw Exception('Invalid backup format');
+      }
+      Map<String, dynamic> data = Map<String, dynamic>.from(decoded);
       if (data['purchases'] is List) {
         List<Purchase> purchases = (data['purchases'] as List).map((item) => Purchase.fromMap(Map<String, dynamic>.from(item))).toList();
         await savePurchases(purchases);
@@ -903,18 +959,19 @@ class StorageService {
       if (kIsWeb) {
         final blob = html.Blob([bytes], 'text/csv');
         final url = html.Url.createObjectUrlFromBlob(blob);
-        final anchor = html.AnchorElement(href: url)..setAttribute('download', fileName)..click();
+        html.AnchorElement(href: url)
+          ..setAttribute('download', fileName)
+          ..click();
         html.Url.revokeObjectUrl(url);
         return 'Downloaded: $fileName';
       } else {
-        // Use the new _saveToAppStorage method for consistency
         return await _saveToAppStorage(Uint8List.fromList(bytes), fileName);
       }
     } catch (e) {
+      if (kIsWeb) rethrow;
       final tempDir = await getTemporaryDirectory();
       final savePath = '${tempDir.path}/$fileName';
-      final File file = File(savePath);
-      await file.writeAsBytes(bytes, flush: true);
+      await writeBytesToPath(savePath, bytes);
       await Share.shareXFiles([XFile(savePath)]);
       return 'File shared instead: $savePath';
     }
@@ -922,30 +979,45 @@ class StorageService {
 
   Future<bool> checkFileExists(String filePath) async {
     try {
-      final file = File(filePath);
-      return await file.exists();
+      return await pathExists(filePath);
     } catch (e) {
       return false;
     }
   }
 
+  Future<List<int>> readExportedFileBytes(String filePath) {
+    return readBytesFromPath(filePath);
+  }
+
+  Future<void> _shareBytes(Uint8List bytes, String fileName, String text) async {
+    if (kIsWeb) {
+      await saveFileLocally(bytes, fileName);
+      return;
+    }
+    final tempDir = await getTemporaryDirectory();
+    final tempPath = '${tempDir.path}/$fileName';
+    await writeBytesToPath(tempPath, bytes);
+    await Share.shareXFiles([XFile(tempPath)], text: text);
+    await _saveToAppStorage(bytes, fileName);
+  }
+
   Future<List<Map<String, dynamic>>> getExportedFiles() async {
+    if (kIsWeb) return [];
     try {
       final directory = await getApplicationDocumentsDirectory();
-      final stackTrackDir = Directory('${directory.path}/SatStack');
-      if (!await stackTrackDir.exists()) return [];
-      final files = await stackTrackDir.list().toList();
-      final List<Map<String, dynamic>> fileList = [];
-      for (var file in files) {
-        if (file is File) {
-          final stat = await file.stat();
-          fileList.add({
-            'name': file.uri.pathSegments.last, 'path': file.path, 'size': stat.size,
-            'modified': stat.modified, 'type': _getFileType(file.uri.pathSegments.last),
-          });
-        }
-      }
-      fileList.sort((a, b) => b['modified'].compareTo(a['modified']));
+      final stackTrackDir = '${directory.path}/SatStack';
+      final files = await listDir(stackTrackDir);
+      final fileList = files
+          .where((file) => file.isFile)
+          .map((file) => {
+                'name': file.name,
+                'path': file.path,
+                'size': file.size,
+                'modified': file.modified,
+                'type': _getFileType(file.name),
+              })
+          .toList();
+      fileList.sort((a, b) => (b['modified'] as DateTime).compareTo(a['modified'] as DateTime));
       return fileList;
     } catch (e) {
       throw Exception('Failed to get files: $e');
@@ -962,8 +1034,7 @@ class StorageService {
 
   Future<void> deleteExportedFile(String filePath) async {
     try {
-      final file = File(filePath);
-      if (await file.exists()) await file.delete();
+      await deletePath(filePath);
     } catch (e) {
       throw Exception('Failed to delete file: $e');
     }
@@ -997,12 +1068,11 @@ class StorageService {
       await openFile(filePath);
     } catch (e) {
       print('Direct open failed: $e');
-      final file = File(filePath);
-      if (await file.exists()) {
-        final fileName = file.uri.pathSegments.last.toLowerCase();
+      if (await pathExists(filePath)) {
+        final fileName = filePath.split('/').last.toLowerCase();
         if (fileName.endsWith('.csv')) {
           try {
-            final content = await file.readAsString();
+            final content = await readStringFromPath(filePath);
             await Share.share(content, subject: 'CSV File Content');
           } catch (shareError) {
             await shareFile(filePath);

@@ -1,6 +1,7 @@
-// widgets.dart
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'constants.dart';
+import 'pin_crypto.dart';
 import 'security_service.dart';
 
 class TimeRangeSelector extends StatelessWidget {
@@ -20,8 +21,14 @@ class TimeRangeSelector extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-      children: TimeRange.values.map((range) => _buildTimeRangeButton(range)).toList(),
+      children: TimeRange.values.map((range) {
+        return Expanded(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2),
+            child: _buildTimeRangeButton(range),
+          ),
+        );
+      }).toList(),
     );
   }
 
@@ -30,12 +37,17 @@ class TimeRangeSelector extends StatelessWidget {
     return ElevatedButton(
       style: ElevatedButton.styleFrom(
         backgroundColor: isSel ? bitcoinOrange : isDarkMode ? Colors.grey[800]! : Colors.grey[300]!,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+        minimumSize: const Size(0, 36),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
       onPressed: isRefreshing ? null : () => onTimeRangeChanged(range),
-      child: Text(
-        timeRangeToString(range),
-        style: TextStyle(color: isSel ? Colors.black : isDarkMode ? Colors.white : Colors.black),
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Text(
+          timeRangeToString(range),
+          style: TextStyle(color: isSel ? Colors.black : isDarkMode ? Colors.white : Colors.black),
+        ),
       ),
     );
   }
@@ -92,7 +104,7 @@ class _SecuritySettingsDialogState extends State<SecuritySettingsDialog> {
             Row(children: [
               Icon(Icons.security, color: const Color(0xFFF7931A), size: 24),
               const SizedBox(width: 12),
-              Text('Security Settings', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: textColor)),
+              Expanded(child: Text('Security Settings', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: textColor), overflow: TextOverflow.ellipsis)),
             ]),
             const SizedBox(height: 20),
             _buildSecurityTypeDropdown(textColor, cardColor, borderColor),
@@ -159,17 +171,27 @@ class _SecuritySettingsDialogState extends State<SecuritySettingsDialog> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('Set PIN Code', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: textColor)),
+        const SizedBox(height: 4),
+        Text(
+          'Locks the app and wraps local storage. It does not encrypt the whole phone, and exported files stay readable.',
+          style: TextStyle(fontSize: 12, color: textColor.withOpacity(0.7)),
+        ),
         const SizedBox(height: 8),
         TextField(
           controller: _pinController,
           obscureText: _obscurePin,
           keyboardType: TextInputType.number,
-          maxLength: 4,
-          enableInteractiveSelection: true,
+          maxLength: pinMaxLength,
+          enableInteractiveSelection: false,
           enableSuggestions: false,
           autocorrect: false,
+          contextMenuBuilder: (context, state) => const SizedBox.shrink(),
+          inputFormatters: [
+            FilteringTextInputFormatter.digitsOnly,
+            LengthLimitingTextInputFormatter(pinMaxLength),
+          ],
           decoration: InputDecoration(
-            labelText: 'Enter 4-digit PIN',
+            labelText: 'Enter 4-6 digit PIN',
             border: const OutlineInputBorder(),
             filled: true,
             fillColor: cardColor,
@@ -192,10 +214,15 @@ class _SecuritySettingsDialogState extends State<SecuritySettingsDialog> {
           controller: _confirmPinController,
           obscureText: _obscureConfirmPin,
           keyboardType: TextInputType.number,
-          maxLength: 4,
-          enableInteractiveSelection: true,
+          maxLength: pinMaxLength,
+          enableInteractiveSelection: false,
           enableSuggestions: false,
           autocorrect: false,
+          contextMenuBuilder: (context, state) => const SizedBox.shrink(),
+          inputFormatters: [
+            FilteringTextInputFormatter.digitsOnly,
+            LengthLimitingTextInputFormatter(pinMaxLength),
+          ],
           decoration: InputDecoration(
             labelText: 'Confirm PIN',
             border: const OutlineInputBorder(),
@@ -234,6 +261,11 @@ class _SecuritySettingsDialogState extends State<SecuritySettingsDialog> {
         const SizedBox(height: 8),
         TextField(
           controller: _answerController,
+          obscureText: true,
+          enableInteractiveSelection: false,
+          enableSuggestions: false,
+          autocorrect: false,
+          contextMenuBuilder: (context, state) => const SizedBox.shrink(),
           decoration: InputDecoration(labelText: 'Answer', border: const OutlineInputBorder(), filled: true, fillColor: cardColor),
           style: TextStyle(color: textColor),
         ),
@@ -244,18 +276,23 @@ class _SecuritySettingsDialogState extends State<SecuritySettingsDialog> {
 
   Future<void> _saveSecuritySettings() async {
     if (_selectedSecurityType == SecurityService.pinSecurity && _isSettingUp) {
-      if (_pinController.text.length != 4) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('PIN must be 4 digits')));
+      if (!PinCrypto.isValidPin(_pinController.text)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('PIN must be $pinMinLength–$pinMaxLength digits')),
+        );
         return;
       }
       if (_pinController.text != _confirmPinController.text) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('PINs do not match')));
         return;
       }
+      if (_questionController.text.trim().isEmpty || _answerController.text.trim().isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('A recovery question and answer are required')),
+        );
+        return;
+      }
       await _securityService.setPinCode(_pinController.text);
-    }
-
-    if (_selectedSecurityType != SecurityService.noSecurity && _questionController.text.isNotEmpty && _answerController.text.isNotEmpty) {
       await _securityService.setBackupQuestion(_questionController.text, _answerController.text);
     }
 
@@ -273,8 +310,17 @@ class LoginScreen extends StatefulWidget {
   final bool isDarkMode;
   final Widget child;
   final VoidCallback? onSecurityReset;
+  final Future<void> Function()? onUnlocked;
+  final Future<void> Function()? onWipeStorage;
 
-  const LoginScreen({Key? key, required this.isDarkMode, required this.child, this.onSecurityReset}) : super(key: key);
+  const LoginScreen({
+    Key? key,
+    required this.isDarkMode,
+    required this.child,
+    this.onSecurityReset,
+    this.onUnlocked,
+    this.onWipeStorage,
+  }) : super(key: key);
 
   @override
   _LoginScreenState createState() => _LoginScreenState();
@@ -287,6 +333,10 @@ class _LoginScreenState extends State<LoginScreen> {
   String _securityType = SecurityService.noSecurity;
   bool _showRecovery = false, _isUnlocked = false;
   bool _obscurePin = true;
+  bool _lockedOut = false;
+  bool _securityLoaded = false;
+  bool _storageFailed = false;
+  String? _authError;
 
   @override
   void initState() {
@@ -295,32 +345,60 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _loadSecuritySettings() async {
-    final type = await _securityService.getSecurityType();
-    setState(() {
-      _securityType = type;
-      _isUnlocked = type == SecurityService.noSecurity;
-    });
+    try {
+      final type = await _securityService.getSecurityType();
+      if (!mounted) return;
+      setState(() {
+        _securityType = type;
+        _isUnlocked = type == SecurityService.noSecurity;
+        _securityLoaded = true;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _storageFailed = true);
+    }
   }
 
   Future<void> _authenticateWithPin() async {
-    final storedPin = await _securityService.getPinCode();
-    if (_pinController.text == storedPin) {
-      setState(() => _isUnlocked = true);
+    final result = await _securityService.verifyPin(_pinController.text);
+    if (result.success) {
+      try {
+        if (widget.onUnlocked != null) {
+          await widget.onUnlocked!();
+        }
+      } catch (e) {
+        if (!mounted) return;
+        setState(() => _authError = 'Could not open encrypted storage');
+        return;
+      }
+      setState(() {
+        _isUnlocked = true;
+        _authError = null;
+        _lockedOut = false;
+      });
       await Future.delayed(const Duration(milliseconds: 500));
+      if (!mounted) return;
       Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (context) => widget.child));
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Invalid PIN')));
+      setState(() {
+        _lockedOut = result.lockedOut;
+        _authError = result.message;
+      });
+      _pinController.clear();
     }
   }
 
   Future<void> _resetSecurity() async {
-    final question = await _securityService.getBackupQuestion();
-    if (question == null) {
+    if (!await _securityService.hasBackupQuestion()) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No recovery question set')));
       return;
     }
 
-    if (_recoveryAnswerController.text.toLowerCase() == question['answer']) {
+    final result = await _securityService.verifyBackupAnswer(_recoveryAnswerController.text);
+    if (result.success) {
+      try {
+        if (widget.onUnlocked != null) await widget.onUnlocked!();
+      } catch (_) {}
       await _securityService.clearSecurityData();
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Security reset successfully')));
       widget.onSecurityReset?.call();
@@ -328,10 +406,16 @@ class _LoginScreenState extends State<LoginScreen> {
         _showRecovery = false;
         _securityType = SecurityService.noSecurity;
         _isUnlocked = true;
+        _authError = null;
+        _lockedOut = false;
       });
       WidgetsBinding.instance.addPostFrameCallback((_) => _showSecuritySettings());
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Incorrect answer')));
+      setState(() {
+        _lockedOut = result.lockedOut;
+        _authError = result.message;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result.message)));
     }
   }
 
@@ -348,6 +432,27 @@ class _LoginScreenState extends State<LoginScreen> {
     final cardColor = widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white;
     final textColor = widget.isDarkMode ? Colors.white : Colors.black;
 
+    if (_storageFailed) {
+      return SecureStorageErrorScreen(
+        onRetry: () {
+          setState(() => _storageFailed = false);
+          _loadSecuritySettings();
+        },
+        onWipe: () async {
+          if (widget.onWipeStorage != null) await widget.onWipeStorage!();
+        },
+      );
+    }
+
+    if (!_securityLoaded) {
+      return Scaffold(
+        backgroundColor: backgroundColor,
+        body: const Center(
+          child: CircularProgressIndicator(color: Color(0xFFF7931A)),
+        ),
+      );
+    }
+
     if (_securityType == SecurityService.noSecurity) return widget.child;
 
     if (_showRecovery) {
@@ -362,18 +467,28 @@ class _LoginScreenState extends State<LoginScreen> {
                 children: [
                   Text('Reset Security', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: textColor)),
                   const SizedBox(height: 20),
-                  FutureBuilder<Map<String, String>?>(
-                    future: _securityService.getBackupQuestion(),
+                  FutureBuilder<String?>(
+                    future: _securityService.getBackupQuestionText(),
                     builder: (context, snapshot) {
-                      if (!snapshot.hasData) return const CircularProgressIndicator();
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const CircularProgressIndicator();
+                      }
+                      if (!snapshot.hasData || snapshot.data == null) {
+                        return Text('No recovery question set', style: TextStyle(fontSize: 16, color: textColor), textAlign: TextAlign.center);
+                      }
                       return Column(
                         children: [
-                          Text(snapshot.data!['question']!, style: TextStyle(fontSize: 18, color: textColor), textAlign: TextAlign.center),
+                          Text(snapshot.data!, style: TextStyle(fontSize: 18, color: textColor), textAlign: TextAlign.center),
                           const SizedBox(height: 20),
                           SizedBox(
                             width: 200,
                             child: TextField(
                               controller: _recoveryAnswerController,
+                              obscureText: true,
+                              enableInteractiveSelection: false,
+                              enableSuggestions: false,
+                              autocorrect: false,
+                              contextMenuBuilder: (context, state) => const SizedBox.shrink(),
                               decoration: InputDecoration(
                                 hintText: 'Your answer',
                                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
@@ -443,12 +558,18 @@ class _LoginScreenState extends State<LoginScreen> {
           controller: _pinController,
           obscureText: _obscurePin,
           keyboardType: TextInputType.number,
-          maxLength: 4,
+          maxLength: pinMaxLength,
           textAlign: TextAlign.center,
           textAlignVertical: TextAlignVertical.center,
-          enableInteractiveSelection: true,
+          enableInteractiveSelection: false,
           enableSuggestions: false,
           autocorrect: false,
+          enabled: !_lockedOut,
+          contextMenuBuilder: (context, state) => const SizedBox.shrink(),
+          inputFormatters: [
+            FilteringTextInputFormatter.digitsOnly,
+            LengthLimitingTextInputFormatter(pinMaxLength),
+          ],
           style: TextStyle(
             fontSize: 24,
             color: textColor,
@@ -485,9 +606,17 @@ class _LoginScreenState extends State<LoginScreen> {
           onSubmitted: (value) => _authenticateWithPin(),
         ),
       ),
+      if (_authError != null) ...[
+        const SizedBox(height: 12),
+        Text(
+          _authError!,
+          style: const TextStyle(color: Colors.redAccent, fontSize: 13),
+          textAlign: TextAlign.center,
+        ),
+      ],
       const SizedBox(height: 20),
       ElevatedButton(
-        onPressed: _authenticateWithPin,
+        onPressed: _lockedOut ? null : _authenticateWithPin,
         style: ElevatedButton.styleFrom(
           backgroundColor: const Color(0xFFF7931A),
           foregroundColor: Colors.black,
@@ -563,10 +692,10 @@ class CompactCurrencyDisplay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [
-        _buildCurrencyButton(favoriteCurrency),
-        _buildCurrencyButton(secondaryCurrency),
+        Expanded(child: _buildCurrencyButton(favoriteCurrency)),
+        const SizedBox(width: 8),
+        Expanded(child: _buildCurrencyButton(secondaryCurrency)),
         IconButton(
           icon: const Icon(Icons.more_horiz, size: 28),
           onPressed: onSettingsPressed,
@@ -589,21 +718,26 @@ class CompactCurrencyDisplay extends StatelessWidget {
         style: ElevatedButton.styleFrom(
           backgroundColor: isSelected ? bitcoinOrange : isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
           foregroundColor: isSelected ? Colors.black : (isDarkMode ? Colors.white : Colors.black),
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+          minimumSize: const Size(0, 44),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           elevation: 0,
         ),
         onPressed: isRefreshing ? null : () => onCurrencyChanged(currency),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(symbol, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-            const SizedBox(width: 6),
-            Text(currencyToString(currency),
-                style: TextStyle(fontSize: 16, color: isSelected ? Colors.black : isDarkMode ? Colors.white70 : Colors.black54)),
-            const SizedBox(width: 6),
-            Text(price == 0 ? '-' : price.toStringAsFixed(0), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          ],
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(symbol, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+              const SizedBox(width: 6),
+              Text(currencyToString(currency),
+                  style: TextStyle(fontSize: 16, color: isSelected ? Colors.black : isDarkMode ? Colors.white70 : Colors.black54)),
+              const SizedBox(width: 6),
+              Text(price == 0 ? '-' : price.toStringAsFixed(0), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            ],
+          ),
         ),
       ),
     );
@@ -653,14 +787,15 @@ class _CurrencySettingsDialogState extends State<CurrencySettingsDialog> {
       backgroundColor: backgroundColor,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.0)),
       contentPadding: const EdgeInsets.all(20),
-      content: Column(
+      content: SingleChildScrollView(
+        child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(children: [
             Icon(Icons.currency_exchange, color: const Color(0xFFF7931A), size: 24),
             const SizedBox(width: 12),
-            Text('Currency Settings', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: textColor)),
+            Expanded(child: Text('Currency Settings', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: textColor), overflow: TextOverflow.ellipsis)),
           ]),
           const SizedBox(height: 20),
           _buildDropdown('Favorite Currency', _tempFavorite, textColor, cardColor, borderColor, (newValue) {
@@ -697,6 +832,7 @@ class _CurrencySettingsDialogState extends State<CurrencySettingsDialog> {
             ],
           ),
         ],
+        ),
       ),
     );
   }
@@ -760,6 +896,62 @@ class _CurrencySettingsDialogState extends State<CurrencySettingsDialog> {
           ],
         ),
       ],
+    );
+  }
+}
+
+class SecureStorageErrorScreen extends StatelessWidget {
+  final VoidCallback onRetry;
+  final VoidCallback onWipe;
+
+  const SecureStorageErrorScreen({
+    super.key,
+    required this.onRetry,
+    required this.onWipe,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF121212),
+      body: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.lock_clock, color: Color(0xFFF7931A), size: 56),
+            const SizedBox(height: 20),
+            const Text(
+              'Secure storage is unreadable',
+              style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'The device keystore could not be opened. Retry, or wipe local SatStack data and start over. Wiping cannot be undone.',
+              style: TextStyle(color: Colors.white70, fontSize: 14),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 28),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: onRetry,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFF7931A),
+                  foregroundColor: Colors.black,
+                ),
+                child: const Text('Retry'),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextButton(
+              onPressed: onWipe,
+              child: const Text('Wipe local data', style: TextStyle(color: Colors.redAccent)),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

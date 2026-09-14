@@ -44,3 +44,10 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
+# Signing secrets — keep local copies, never commit
+android/keystore.properties
+android/*.jks
+android/app/*.jks
+store/*.json
+store/*service-account*
+

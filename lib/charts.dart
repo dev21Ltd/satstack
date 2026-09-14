@@ -5,9 +5,16 @@ import 'package:intl/intl.dart';
 import 'models.dart';
 import 'constants.dart';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 import 'package:flutter_animate/flutter_animate.dart';
 
 enum PortfolioTimeRange { MONTH_1, MONTH_6, YEAR_1, YEAR_3, MAX }
+
+/// Chart X/Y axis style.
+/// `true`  = calendar ticks, nice Y numbers, upright labels.
+/// `false` = previous index-interval axes with rotated dates.
+/// Set this to `false` to restore the previous chart axes.
+const bool kUseNiceChartAxes = true;
 
 class PortfolioChart extends StatefulWidget {
   final List<Purchase> purchases;
@@ -26,6 +33,7 @@ class PortfolioChart extends StatefulWidget {
   final Denomination denomination;
   final Map<Currency, double> btcPrices;
   final bool holdingsHidden;
+  final Map<Currency, double> Function(DateTime date)? pricesOnDate;
 
   const PortfolioChart({
     Key? key,
@@ -45,6 +53,7 @@ class PortfolioChart extends StatefulWidget {
     required this.denomination,
     required this.btcPrices,
     required this.holdingsHidden,
+    this.pricesOnDate,
   }) : super(key: key);
 
   @override
@@ -61,6 +70,12 @@ class _PortfolioChartState extends State<PortfolioChart>
   PortfolioTimeRange _selectedTimeRange = PortfolioTimeRange.MONTH_1;
   double _averagePurchasePrice = 0, _totalBTC = 0;
   int? _hoveredIndex;
+  List<int> _xTicks = [];
+  double _yInterval = 1000;
+  List<_TradeCluster> _clusters = [];
+  final Map<int, _TradeCluster> _clusterByIndex = {};
+  List<int> _stripBuys = [];
+  List<int> _stripSells = [];
 
   final Color _portfolioColor = Color(0xFF34C759);
   final Color _investmentColor = Color(0xFF8E8E93);
@@ -76,7 +91,7 @@ class _PortfolioChartState extends State<PortfolioChart>
         vsync: this, duration: 1000.ms);
     _animation = CurvedAnimation(
         parent: _animationController, curve: Curves.easeOutCubic);
-    _calculatePortfolioData();
+    _calculatePortfolioData(notify: false);
     _animationController.forward();
     _isInitialized = true;
   }
@@ -92,7 +107,7 @@ class _PortfolioChartState extends State<PortfolioChart>
         oldWidget.totalInvestment != widget.totalInvestment ||
         oldWidget.profitLoss != widget.profitLoss ||
         oldWidget.holdingsHidden != widget.holdingsHidden) {
-      _calculatePortfolioData();
+      _calculatePortfolioData(notify: false);
       if (_isInitialized) {
         _animationController.reset();
         _animationController.forward();
@@ -101,21 +116,48 @@ class _PortfolioChartState extends State<PortfolioChart>
   }
 
   void _setTimeRange(PortfolioTimeRange timeRange) {
-    setState(() => _selectedTimeRange = timeRange);
-    _calculatePortfolioData();
+    setState(() {
+      _selectedTimeRange = timeRange;
+      _calculatePortfolioData(notify: false);
+    });
   }
 
-  void _calculatePortfolioData() {
+  void _calculatePortfolioData({bool notify = true}) {
+    try {
+      _calculatePortfolioDataUnsafe();
+    } catch (e, st) {
+      print('Chart data error: $e\n$st');
+      _portfolioData = [
+        PortfolioDataPoint(
+          date: DateTime.now(),
+          portfolioValue: widget.portfolioValue.isFinite ? widget.portfolioValue : 0,
+          investmentValue: widget.totalInvestment.isFinite ? widget.totalInvestment : 0,
+          btcAmount: _totalBTC.isFinite ? _totalBTC : 0,
+        ),
+      ];
+      _minValue = 0;
+      _maxValue = 1000;
+      _yInterval = 250;
+      _xTicks = const [0];
+      _clusters = [];
+      _clusterByIndex.clear();
+      _stripBuys = [];
+      _stripSells = [];
+    }
+    if (notify && mounted) setState(() {});
+  }
+
+  void _calculatePortfolioDataUnsafe() {
     if (widget.purchases.isEmpty) {
       _portfolioData = [];
-      setState(() {});
       return;
     }
 
     final sortedPurchases = List<Purchase>.from(widget.purchases)
       ..sort((a, b) => a.date.compareTo(b.date));
-    _totalBTC = sortedPurchases.fold(
-        0.0, (sum, purchase) => sum + purchase.amountBTC) -
+    final purchasedBtc = sortedPurchases.fold(
+        0.0, (sum, purchase) => sum + purchase.amountBTC);
+    _totalBTC = purchasedBtc -
         widget.sales.fold(0.0, (sum, sale) => sum + sale.amountBTC);
 
     double totalInvestment = sortedPurchases.fold(
@@ -123,8 +165,9 @@ class _PortfolioChartState extends State<PortfolioChart>
             (sum, purchase) =>
         sum +
             _convertCurrency(purchase.totalCashSpent, purchase.cashCurrency,
-                widget.currency));
-    _averagePurchasePrice = _totalBTC > 0 ? totalInvestment / _totalBTC : 0;
+                widget.currency, purchase.date));
+    _averagePurchasePrice =
+        purchasedBtc > 0 ? totalInvestment / purchasedBtc : 0;
 
     _portfolioData = [];
     final now = DateTime.now();
@@ -144,7 +187,8 @@ class _PortfolioChartState extends State<PortfolioChart>
       runningInvestment += _convertCurrency(
           purchase.totalCashSpent,
           purchase.cashCurrency,
-          widget.currency);
+          widget.currency,
+          purchase.date);
       purchaseIndex++;
     }
 
@@ -188,7 +232,6 @@ class _PortfolioChartState extends State<PortfolioChart>
     // ----------------------------------------------------------
 
     _calculateMinMaxValues();
-    setState(() {});
   }
 
   DateTime _calculateStartDate(DateTime firstPurchaseDate, DateTime now) {
@@ -433,6 +476,27 @@ class _PortfolioChartState extends State<PortfolioChart>
         0,
             (prev, e) =>
             math.max(prev, math.max(e.portfolioValue, e.investmentValue)));
+    if (!_minValue.isFinite) _minValue = 0;
+    if (!_maxValue.isFinite) _maxValue = 0;
+
+    if (kUseNiceChartAxes) {
+      try {
+        _applyNiceYRange();
+        _xTicks = _dropDuplicateLabels(_timelineTickIndices());
+        _rebuildTradeOverlays();
+      } catch (e) {
+        print('Chart axis error: $e');
+        _yInterval = 1000;
+        _minValue = 0;
+        _maxValue = 1000;
+        _xTicks = _portfolioData.length <= 1
+            ? const [0]
+            : [0, _portfolioData.length - 1];
+        _clusters = [];
+        _clusterByIndex.clear();
+      }
+      return;
+    }
 
     final valueRange = _maxValue - _minValue;
     if (valueRange > 0) {
@@ -449,6 +513,296 @@ class _PortfolioChartState extends State<PortfolioChart>
       _minValue = mid - range / 2;
       _maxValue = mid + range / 2;
     }
+    _yInterval = _getPriceInterval(_minValue, _maxValue);
+    _xTicks = [];
+  }
+
+  void _applyNiceYRange() {
+    var dataMin = _minValue.isFinite ? _minValue : 0.0;
+    var dataMax = _maxValue.isFinite ? _maxValue : 0.0;
+    if (dataMax <= dataMin) dataMax = dataMin + 1;
+    final neverNegative = dataMin >= 0;
+    var span = dataMax - (neverNegative && dataMin <= dataMax * 0.15 ? 0 : dataMin);
+    if (!span.isFinite || span <= 0) span = 1;
+    _yInterval = _getPriceInterval(0, span);
+    if (!_yInterval.isFinite || _yInterval <= 0) _yInterval = 1000;
+
+    if (neverNegative && dataMin <= dataMax * 0.15) {
+      _minValue = 0;
+    } else {
+      _minValue = (dataMin / _yInterval).floor() * _yInterval;
+      if (neverNegative && _minValue < 0) _minValue = 0;
+    }
+    _maxValue = (dataMax / _yInterval).ceil() * _yInterval;
+    if (!_minValue.isFinite) _minValue = 0;
+    if (!_maxValue.isFinite) _maxValue = _minValue + _yInterval * 4;
+    if (_maxValue <= _minValue) _maxValue = _minValue + _yInterval * 4;
+    while (_yInterval > 0 && (_maxValue - _minValue) / _yInterval < 3) {
+      _maxValue += _yInterval;
+    }
+  }
+
+  /// Calendar labels only (not one label per trade). First/last always kept.
+  List<int> _timelineTickIndices() {
+    final n = _portfolioData.length;
+    if (n == 0) return [];
+    if (n == 1) return const [0];
+
+    final periodStarts = <int>[0];
+    String? lastBucket;
+    for (var i = 0; i < n; i++) {
+      final bucket = _timelineBucket(_portfolioData[i].date);
+      if (bucket != lastBucket) {
+        if (i != 0) periodStarts.add(i);
+        lastBucket = bucket;
+      }
+    }
+    if (periodStarts.last != n - 1) periodStarts.add(n - 1);
+
+    final maxTicks = _maxTimelineTicks();
+    if (periodStarts.length <= maxTicks) return periodStarts;
+    return _evenSampleKeepingEnds(periodStarts, maxTicks);
+  }
+
+  int _maxTimelineTicks() {
+    switch (_selectedTimeRange) {
+      case PortfolioTimeRange.MONTH_1:
+        return 6;
+      case PortfolioTimeRange.MONTH_6:
+        return 6;
+      case PortfolioTimeRange.YEAR_1:
+        return 8;
+      case PortfolioTimeRange.YEAR_3:
+      case PortfolioTimeRange.MAX:
+        return 12;
+    }
+  }
+
+  String _timelineBucket(DateTime date) {
+    switch (_selectedTimeRange) {
+      case PortfolioTimeRange.MONTH_1:
+        final monday = date.subtract(Duration(days: date.weekday - DateTime.monday));
+        return '${monday.year}-${monday.month}-${monday.day}';
+      case PortfolioTimeRange.MONTH_6:
+      case PortfolioTimeRange.YEAR_1:
+        return '${date.year}-${date.month}';
+      case PortfolioTimeRange.YEAR_3:
+      case PortfolioTimeRange.MAX:
+        return '${date.year}';
+    }
+  }
+
+  List<int> _evenSampleKeepingEnds(List<int> items, int count) {
+    if (items.length <= count) return items;
+    final inner = count - 2;
+    if (inner <= 0) return [items.first, items.last];
+    final sampled = <int>[items.first];
+    for (var i = 1; i <= inner; i++) {
+      final index = (i * (items.length - 1) / (count - 1)).round();
+      sampled.add(items[index.clamp(1, items.length - 2)]);
+    }
+    sampled.add(items.last);
+    return sampled.toSet().toList()..sort();
+  }
+
+  DateTime get _rangeStart =>
+      _portfolioData.isEmpty ? DateTime.now() : _portfolioData.first.date;
+  DateTime get _rangeEnd =>
+      _portfolioData.isEmpty ? DateTime.now() : _portfolioData.last.date;
+
+  bool _inChartRange(DateTime date) {
+    final day = DateTime(date.year, date.month, date.day);
+    final start = DateTime(_rangeStart.year, _rangeStart.month, _rangeStart.day);
+    final end = DateTime(_rangeEnd.year, _rangeEnd.month, _rangeEnd.day);
+    return !day.isBefore(start) && !day.isAfter(end);
+  }
+
+  int _indexForDate(DateTime date) {
+    if (_portfolioData.isEmpty) return 0;
+    final target = DateTime(date.year, date.month, date.day);
+    var best = 0;
+    var bestDist = 1 << 30;
+    for (var i = 0; i < _portfolioData.length; i++) {
+      final d = _portfolioData[i].date;
+      final dist = DateTime(d.year, d.month, d.day).difference(target).inDays.abs();
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = i;
+      }
+      if (dist == 0) return i;
+    }
+    return best;
+  }
+
+  int _uniqueTradeDaysInView() {
+    final days = <String>{};
+    for (final p in widget.purchases) {
+      if (_inChartRange(p.date)) {
+        days.add('${p.date.year}-${p.date.month}-${p.date.day}');
+      }
+    }
+    for (final s in widget.sales) {
+      if (_inChartRange(s.date)) {
+        days.add('${s.date.year}-${s.date.month}-${s.date.day}');
+      }
+    }
+    return days.length;
+  }
+
+  bool get _shouldClusterTrades => _uniqueTradeDaysInView() > 12;
+
+  String _clusterKey(DateTime date) {
+    if (!_shouldClusterTrades) {
+      return '${date.year}-${date.month}-${date.day}';
+    }
+    switch (_selectedTimeRange) {
+      case PortfolioTimeRange.MONTH_1:
+        final monday = date.subtract(Duration(days: date.weekday - DateTime.monday));
+        return 'w-${monday.year}-${monday.month}-${monday.day}';
+      case PortfolioTimeRange.MONTH_6:
+      case PortfolioTimeRange.YEAR_1:
+        return 'm-${date.year}-${date.month}';
+      case PortfolioTimeRange.YEAR_3:
+      case PortfolioTimeRange.MAX:
+        return _uniqueTradeDaysInView() > 40
+            ? 'q-${date.year}-${((date.month - 1) ~/ 3) + 1}'
+            : 'm-${date.year}-${date.month}';
+    }
+  }
+
+  String _clusterTitle(DateTime date) {
+    if (!_shouldClusterTrades) {
+      return DateFormat('dd/MM/yyyy').format(date);
+    }
+    switch (_selectedTimeRange) {
+      case PortfolioTimeRange.MONTH_1:
+        final monday = date.subtract(Duration(days: date.weekday - DateTime.monday));
+        return 'Week of ${DateFormat('d MMM yyyy').format(monday)}';
+      case PortfolioTimeRange.MONTH_6:
+      case PortfolioTimeRange.YEAR_1:
+        return DateFormat('MMMM yyyy').format(date);
+      case PortfolioTimeRange.YEAR_3:
+      case PortfolioTimeRange.MAX:
+        return _uniqueTradeDaysInView() > 40
+            ? 'Q${((date.month - 1) ~/ 3) + 1} ${date.year}'
+            : DateFormat('MMMM yyyy').format(date);
+    }
+  }
+
+  void _rebuildTradeOverlays() {
+    _clusters = [];
+    _clusterByIndex.clear();
+    if (_portfolioData.isEmpty) {
+      _stripBuys = [];
+      _stripSells = [];
+      return;
+    }
+
+    final byKey = <String, _TradeCluster>{};
+    void addPurchase(Purchase purchase) {
+      if (!_inChartRange(purchase.date)) return;
+      final key = _clusterKey(purchase.date);
+      final cluster = byKey.putIfAbsent(
+        key,
+        () => _TradeCluster(
+          index: _indexForDate(purchase.date),
+          title: _clusterTitle(purchase.date),
+        ),
+      );
+      cluster.purchases.add(purchase);
+    }
+
+    void addSale(Sale sale) {
+      if (!_inChartRange(sale.date)) return;
+      final key = _clusterKey(sale.date);
+      final cluster = byKey.putIfAbsent(
+        key,
+        () => _TradeCluster(
+          index: _indexForDate(sale.date),
+          title: _clusterTitle(sale.date),
+        ),
+      );
+      cluster.sales.add(sale);
+    }
+
+    for (final purchase in widget.purchases) {
+      addPurchase(purchase);
+    }
+    for (final sale in widget.sales) {
+      addSale(sale);
+    }
+
+    final merged = <int, _TradeCluster>{};
+    for (final cluster in byKey.values) {
+      final existing = merged[cluster.index];
+      if (existing == null) {
+        merged[cluster.index] = cluster;
+      } else {
+        existing.purchases.addAll(cluster.purchases);
+        existing.sales.addAll(cluster.sales);
+      }
+    }
+    _clusters = merged.values.toList();
+    _clusterByIndex
+      ..clear()
+      ..addAll(merged);
+
+    const slots = 48;
+    final n = _portfolioData.length;
+    final slotCount = n <= 1 ? 1 : math.min(slots, n);
+    _stripBuys = List<int>.filled(slotCount, 0);
+    _stripSells = List<int>.filled(slotCount, 0);
+    int slotFor(DateTime date) {
+      if (n <= 1) return 0;
+      final i = _indexForDate(date);
+      return ((i / (n - 1)) * (slotCount - 1)).round().clamp(0, slotCount - 1);
+    }
+
+    for (final purchase in widget.purchases) {
+      if (_inChartRange(purchase.date)) _stripBuys[slotFor(purchase.date)]++;
+    }
+    for (final sale in widget.sales) {
+      if (_inChartRange(sale.date)) _stripSells[slotFor(sale.date)]++;
+    }
+  }
+
+  List<_TradeCluster> _clustersForSlot(int slot) {
+    if (_stripBuys.isEmpty) return const [];
+    final n = _portfolioData.length;
+    final slotCount = _stripBuys.length;
+    return _clusters.where((cluster) {
+      final clusterSlot = n <= 1
+          ? 0
+          : ((cluster.index / (n - 1)) * (slotCount - 1)).round().clamp(0, slotCount - 1);
+      return clusterSlot == slot;
+    }).toList();
+  }
+
+  List<int> _dropDuplicateLabels(List<int> ticks) {
+    if (ticks.length <= 1) return ticks;
+    final result = <int>[ticks.first];
+    for (var i = 1; i < ticks.length; i++) {
+      final label = _formatChartDate(_portfolioData[ticks[i]].date);
+      final prev = _formatChartDate(_portfolioData[result.last].date);
+      if (label != prev) {
+        result.add(ticks[i]);
+      } else if (i == ticks.length - 1) {
+        result[result.length - 1] = ticks[i];
+      }
+    }
+    return result;
+  }
+
+  List<int> _evenSample(List<int> items, int count) {
+    if (count <= 0 || items.isEmpty) return const [];
+    if (items.length <= count) return items;
+    if (count == 1) return [items[items.length ~/ 2]];
+    final result = <int>[];
+    for (var i = 0; i < count; i++) {
+      final index = (i * (items.length - 1) / (count - 1)).round();
+      result.add(items[index]);
+    }
+    return result.toSet().toList()..sort();
   }
 
   @override
@@ -472,12 +826,11 @@ class _PortfolioChartState extends State<PortfolioChart>
     }
   }
 
-  double _convertCurrency(double amount, Currency from, Currency to) {
-    if (from == to) return amount;
-    final btcPriceFrom = widget.btcPrices[from] ?? 0.0;
-    final btcPriceTo = widget.btcPrices[to] ?? 0.0;
-    if (btcPriceFrom == 0 || btcPriceTo == 0) return amount;
-    return (amount / btcPriceFrom) * btcPriceTo;
+  double _convertCurrency(double amount, Currency from, Currency to, [DateTime? date]) {
+    final prices = (date != null && widget.pricesOnDate != null)
+        ? widget.pricesOnDate!(date)
+        : widget.btcPrices;
+    return convertViaBtc(amount, from, to, prices);
   }
 
   bool _isPurchaseDate(DateTime date) =>
@@ -548,12 +901,25 @@ class _PortfolioChartState extends State<PortfolioChart>
       _calculateProfitLoss(purchases) >= 0;
 
   void _showDateDetails(DateTime date, List<Purchase> purchases, List<Sale> sales) {
+    _showTradesDialog(
+      DateFormat('dd/MM/yyyy').format(date),
+      purchases,
+      sales,
+    );
+  }
+
+  void _showClusterDetails(_TradeCluster cluster) {
+    _showTradesDialog(cluster.title, cluster.purchases, cluster.sales);
+  }
+
+  void _showTradesDialog(String title, List<Purchase> purchases, List<Sale> sales) {
     if (widget.holdingsHidden) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text('Holdings are currently hidden'),
           backgroundColor: Colors.orange));
       return;
     }
+    if (purchases.isEmpty && sales.isEmpty) return;
 
     double totalAmount = _getTotalPurchaseAmount(purchases);
     double averagePricePerBTC = _getAveragePurchasePrice(purchases);
@@ -566,7 +932,7 @@ class _PortfolioChartState extends State<PortfolioChart>
     showDialog(
         context: context,
         builder: (BuildContext context) => _buildDateDetailsDialog(
-            date,
+            title,
             purchases,
             sales,
             totalAmount,
@@ -579,7 +945,7 @@ class _PortfolioChartState extends State<PortfolioChart>
   }
 
   AlertDialog _buildDateDetailsDialog(
-      DateTime date,
+      String title,
       List<Purchase> purchases,
       List<Sale> sales,
       double totalAmount,
@@ -590,7 +956,7 @@ class _PortfolioChartState extends State<PortfolioChart>
       double profitLossPercentage,
       bool isProfit) {
     return AlertDialog(
-      title: Text('${date.day}/${date.month}/${date.year}',
+      title: Text(title,
           style: TextStyle(
               color: widget.isDarkMode ? Colors.white : Colors.black)),
       backgroundColor: widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
@@ -1041,9 +1407,7 @@ class _PortfolioChartState extends State<PortfolioChart>
     if (_portfolioData.isEmpty) return _buildLoadingState();
 
     final profitLossColor = widget.profitLoss >= 0 ? _profitColor : _lossColor;
-    return Animate(
-        effects: [FadeEffect(duration: 300.ms), ScaleEffect(duration: 300.ms)],
-        child: Container(
+    return Container(
             decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(16),
                 color: widget.isDarkMode ? Color(0xFF1E1E1E) : Colors.white,
@@ -1063,17 +1427,36 @@ class _PortfolioChartState extends State<PortfolioChart>
                 SizedBox(height: 20),
 
                 Container(
-                  height: 200,
+                  height: kUseNiceChartAxes ? 216 : 200,
                   constraints: BoxConstraints(minWidth: double.infinity),
                   child: widget.holdingsHidden
                       ? _buildHiddenChart()
-                      : LineChart(_buildChartData()),
+                      : LayoutBuilder(
+                          builder: (context, constraints) {
+                            if (!constraints.hasBoundedWidth ||
+                                constraints.maxWidth < 16) {
+                              return const SizedBox.expand();
+                            }
+                            try {
+                              return LineChart(_buildChartData());
+                            } catch (e, st) {
+                              print('LineChart error: $e\n$st');
+                              return const Center(
+                                child: Text('Chart unavailable'),
+                              );
+                            }
+                          },
+                        ),
                 ),
+                if (kUseNiceChartAxes && !widget.holdingsHidden) ...[
+                  const SizedBox(height: 8),
+                  _buildActivityStrip(),
+                ],
 
                 SizedBox(height: 16),
                 _buildLegendAndMetrics(profitLossColor),
               ],
-            )));
+            ));
   }
 
   Widget _buildCleanHeader(Color profitLossColor) {
@@ -1138,22 +1521,26 @@ class _PortfolioChartState extends State<PortfolioChart>
               children: [
                 Icon(icon, color: iconColor, size: 16),
                 SizedBox(width: 6),
-                Text(title,
-                    style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: widget.isDarkMode ? Colors.white70 : Colors.black54),
-                    overflow: TextOverflow.ellipsis),
+                Flexible(
+                  child: Text(title,
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: widget.isDarkMode ? Colors.white70 : Colors.black54),
+                      overflow: TextOverflow.ellipsis),
+                ),
               ],
             ),
             SizedBox(height: 6),
-            Text(value,
-                style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: valueColor),
-                overflow: TextOverflow.ellipsis,
-                maxLines: 2),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(value,
+                  style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: valueColor),
+                  maxLines: 1),
+            ),
             SizedBox(height: 2),
             Text(subtitle,
                 style: TextStyle(
@@ -1206,49 +1593,108 @@ class _PortfolioChartState extends State<PortfolioChart>
             )));
   }
 
-  Widget _buildTimeRangeSelector() {
-    return Container(
-        width: double.infinity,
-        child: LayoutBuilder(builder: (context, constraints) {
-          final buttonWidth = constraints.maxWidth / 5 - 8;
-          return Container(
-              padding: EdgeInsets.symmetric(horizontal: 4),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  _buildTimeRangeButton(PortfolioTimeRange.MONTH_1, buttonWidth),
-                  _buildTimeRangeButton(PortfolioTimeRange.MONTH_6, buttonWidth),
-                  _buildTimeRangeButton(PortfolioTimeRange.YEAR_1, buttonWidth),
-                  _buildTimeRangeButton(PortfolioTimeRange.YEAR_3, buttonWidth),
-                  _buildTimeRangeButton(PortfolioTimeRange.MAX, buttonWidth),
-                ],
-              ));
-        }));
+  Widget _buildActivityStrip() {
+    final hasActivity = _stripBuys.any((c) => c > 0) || _stripSells.any((c) => c > 0);
+    return Padding(
+      padding: const EdgeInsets.only(left: 44, right: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final width = constraints.hasBoundedWidth ? constraints.maxWidth : 0.0;
+              if (width < 8) return const SizedBox(height: 18);
+              return GestureDetector(
+                onTapDown: hasActivity
+                    ? (details) => _onActivityStripTap(details, width)
+                    : null,
+                child: SizedBox(
+                  height: 18,
+                  width: width,
+                  child: CustomPaint(
+                    painter: _ActivityStripPainter(
+                      buys: _stripBuys,
+                      sells: _stripSells,
+                      buyColor: _purchaseDotColor,
+                      sellColor: _saleDotColor,
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+          if (_shouldClusterTrades)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                'Tap a mark or the activity bar for trades',
+                style: TextStyle(
+                  fontSize: 10,
+                  color: widget.isDarkMode ? Colors.white38 : Colors.black38,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
   }
 
-  Widget _buildTimeRangeButton(PortfolioTimeRange timeRange, double buttonWidth) {
+  void _onActivityStripTap(TapDownDetails details, double width) {
+    final slotCount = _stripBuys.length;
+    if (slotCount == 0 || width <= 0) return;
+    final slot = (details.localPosition.dx / (width / slotCount)).floor().clamp(0, slotCount - 1);
+    final clusters = _clustersForSlot(slot);
+    if (clusters.isEmpty) return;
+    final purchases = [for (final c in clusters) ...c.purchases];
+    final sales = [for (final c in clusters) ...c.sales];
+    final title = clusters.length == 1
+        ? clusters.first.title
+        : '${purchases.length + sales.length} trades';
+    _showTradesDialog(title, purchases, sales);
+  }
+
+  Widget _buildTimeRangeSelector() {
+    return Row(
+      children: [
+        _buildTimeRangeButton(PortfolioTimeRange.MONTH_1),
+        _buildTimeRangeButton(PortfolioTimeRange.MONTH_6),
+        _buildTimeRangeButton(PortfolioTimeRange.YEAR_1),
+        _buildTimeRangeButton(PortfolioTimeRange.YEAR_3),
+        _buildTimeRangeButton(PortfolioTimeRange.MAX),
+      ],
+    );
+  }
+
+  Widget _buildTimeRangeButton(PortfolioTimeRange timeRange) {
     final isSelected = _selectedTimeRange == timeRange;
-    return Container(
-        width: buttonWidth,
+    return Expanded(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 2),
         child: ElevatedButton(
             style: ElevatedButton.styleFrom(
                 backgroundColor: isSelected
                     ? Color(0xFFF7931A)
                     : widget.isDarkMode ? Colors.grey[800] : Colors.grey[300],
-                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 8),
+                minimumSize: const Size(0, 36),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(6))),
             onPressed: () => _setTimeRange(timeRange),
-            child: Text(_getTimeRangeLabel(timeRange),
-                style: TextStyle(
-                    color: isSelected
-                        ? Colors.black
-                        : widget.isDarkMode ? Colors.white : Colors.black,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600),
-                textAlign: TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis)));
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(_getTimeRangeLabel(timeRange),
+                  style: TextStyle(
+                      color: isSelected
+                          ? Colors.black
+                          : widget.isDarkMode ? Colors.white : Colors.black,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600),
+                  textAlign: TextAlign.center,
+                  maxLines: 1),
+            )),
+      ),
+    );
   }
 
   LineChartData _buildChartData() {
@@ -1260,22 +1706,38 @@ class _PortfolioChartState extends State<PortfolioChart>
               response?.lineBarSpots != null &&
               response!.lineBarSpots!.isNotEmpty) {
             final spot = response.lineBarSpots!.first;
-            final dataPoint = _portfolioData[spot.spotIndex.toInt()];
-            final purchases = _getPurchasesForDate(dataPoint.date);
-            final sales = _getSalesForDate(dataPoint.date);
-            if (purchases.isNotEmpty || sales.isNotEmpty) {
-              _showDateDetails(dataPoint.date, purchases, sales);
+            final index = spot.spotIndex.toInt();
+            if (index < 0 || index >= _portfolioData.length) return;
+            if (kUseNiceChartAxes) {
+              final cluster = _clusterByIndex[index];
+              if (cluster != null) {
+                _showClusterDetails(cluster);
+              }
+            } else {
+              final dataPoint = _portfolioData[index];
+              final purchases = _getPurchasesForDate(dataPoint.date);
+              final sales = _getSalesForDate(dataPoint.date);
+              if (purchases.isNotEmpty || sales.isNotEmpty) {
+                _showDateDetails(dataPoint.date, purchases, sales);
+              }
             }
           }
           if (response?.lineBarSpots != null &&
               response!.lineBarSpots!.isNotEmpty) {
             final spot = response.lineBarSpots!.first;
-            final dataPoint = _portfolioData[spot.spotIndex.toInt()];
-            final isPurchaseOrSale =
-                _isPurchaseDate(dataPoint.date) || _isSaleDate(dataPoint.date);
-            setState(() => _hoveredIndex =
-            isPurchaseOrSale ? spot.spotIndex : null);
-          } else {
+            final index = spot.spotIndex.toInt();
+            if (!mounted || index < 0 || index >= _portfolioData.length) return;
+            if (kUseNiceChartAxes) {
+              setState(() => _hoveredIndex =
+                  _clusterByIndex.containsKey(index) ? index : null);
+            } else {
+              final dataPoint = _portfolioData[index];
+              final isPurchaseOrSale =
+                  _isPurchaseDate(dataPoint.date) || _isSaleDate(dataPoint.date);
+              setState(() => _hoveredIndex =
+              isPurchaseOrSale ? index : null);
+            }
+          } else if (mounted) {
             setState(() => _hoveredIndex = null);
           }
         },
@@ -1287,7 +1749,37 @@ class _PortfolioChartState extends State<PortfolioChart>
           tooltipPadding: EdgeInsets.all(12),
           getTooltipItems: (touchedSpots) =>
               touchedSpots.map((touchedSpot) {
+                if (touchedSpot.spotIndex < 0 ||
+                    touchedSpot.spotIndex >= _portfolioData.length) {
+                  return LineTooltipItem('', const TextStyle(fontSize: 1));
+                }
                 final dataPoint = _portfolioData[touchedSpot.spotIndex];
+
+                if (kUseNiceChartAxes &&
+                    touchedSpot.barIndex == 0 &&
+                    _clusterByIndex.containsKey(touchedSpot.spotIndex)) {
+                  final cluster = _clusterByIndex[touchedSpot.spotIndex]!;
+                  final currencySymbol = _getCurrencySymbol(widget.currency);
+                  final parts = <String>[cluster.title];
+                  if (cluster.purchases.isNotEmpty) {
+                    parts.add('${cluster.purchases.length} purchase${cluster.purchases.length == 1 ? '' : 's'}');
+                  }
+                  if (cluster.sales.isNotEmpty) {
+                    parts.add('${cluster.sales.length} sale${cluster.sales.length == 1 ? '' : 's'}');
+                  }
+                  parts.add(_formatCompactValue(
+                      cluster.purchases.fold(0.0, (sum, p) => sum + p.amountBTC * widget.currentBtcPrice),
+                      currencySymbol));
+                  return LineTooltipItem(
+                    parts.join('\n'),
+                    TextStyle(
+                      color: widget.isDarkMode ? Colors.white : Colors.black,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                    ),
+                    textAlign: TextAlign.center,
+                  );
+                }
 
                 if (touchedSpot.barIndex == 0 &&
                     (_isPurchaseDate(dataPoint.date) ||
@@ -1381,8 +1873,14 @@ class _PortfolioChartState extends State<PortfolioChart>
         show: true,
         drawVerticalLine: true,
         drawHorizontalLine: true,
-        horizontalInterval: _getPriceInterval(_minValue, _maxValue),
-        verticalInterval: _getTimeInterval(),
+        horizontalInterval: kUseNiceChartAxes
+            ? _yInterval
+            : _getPriceInterval(_minValue, _maxValue),
+        verticalInterval: kUseNiceChartAxes ? 1 : _getTimeInterval(),
+        checkToShowVerticalLine: (value) {
+          if (!kUseNiceChartAxes) return true;
+          return _xTicks.contains(value.round());
+        },
         getDrawingHorizontalLine: (value) => FlLine(
           color: widget.isDarkMode
               ? Colors.grey.withOpacity(0.15)
@@ -1403,16 +1901,34 @@ class _PortfolioChartState extends State<PortfolioChart>
         bottomTitles: AxisTitles(
           sideTitles: SideTitles(
             showTitles: true,
-            interval: _getTimeInterval(),
+            interval: kUseNiceChartAxes ? 1 : _getTimeInterval(),
+            reservedSize: kUseNiceChartAxes ? 28 : 22,
             getTitlesWidget: (value, meta) {
-              if (value < 0 || value >= _portfolioData.length) return SizedBox();
-              final date = _portfolioData[value.toInt()].date;
+              if (value < 0 || value >= _portfolioData.length) return const SizedBox();
+              final index = value.round();
+              if (kUseNiceChartAxes && !_xTicks.contains(index)) {
+                return const SizedBox();
+              }
+              if ((value - index).abs() > 0.01) return const SizedBox();
+              final date = _portfolioData[index].date;
+              final label = _formatChartDate(date);
+              if (kUseNiceChartAxes) {
+                return Padding(
+                  padding: const EdgeInsets.only(top: 6.0),
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                        fontSize: 10,
+                        color: widget.isDarkMode ? Colors.white54 : Colors.black54),
+                  ),
+                );
+              }
               return Transform.rotate(
                 angle: -0.4,
                 child: Padding(
                   padding: EdgeInsets.only(top: 8.0),
                   child: Text(
-                    _formatChartDate(date),
+                    label,
                     style: TextStyle(
                         fontSize: 9,
                         color: widget.isDarkMode ? Colors.white54 : Colors.black54),
@@ -1425,10 +1941,25 @@ class _PortfolioChartState extends State<PortfolioChart>
         leftTitles: AxisTitles(
           sideTitles: SideTitles(
             showTitles: true,
-            interval: _getPriceInterval(_minValue, _maxValue),
-            reservedSize: 55,
+            interval: kUseNiceChartAxes
+                ? _yInterval
+                : _getPriceInterval(_minValue, _maxValue),
+            reservedSize: kUseNiceChartAxes ? 44 : 55,
             getTitlesWidget: (value, meta) {
-              if (value < _minValue || value > _maxValue) return SizedBox();
+              if (!kUseNiceChartAxes &&
+                  (value < _minValue || value > _maxValue)) {
+                return const SizedBox();
+              }
+              if (kUseNiceChartAxes) {
+                if (!_yInterval.isFinite || _yInterval <= 0) {
+                  return const SizedBox();
+                }
+                final ticksFromMin = ((value - _minValue) / _yInterval);
+                if (!ticksFromMin.isFinite) return const SizedBox();
+                if ((ticksFromMin - ticksFromMin.round()).abs() > 0.02) {
+                  return const SizedBox();
+                }
+              }
               return Padding(
                 padding: EdgeInsets.only(right: 6.0),
                 child: Text(
@@ -1449,9 +1980,11 @@ class _PortfolioChartState extends State<PortfolioChart>
       ),
       borderData: FlBorderData(show: false),
       minX: 0,
-      maxX: (_portfolioData.length - 1).toDouble(),
-      minY: _minValue,
-      maxY: _maxValue,
+      maxX: math.max(1.0, (_portfolioData.length - 1).toDouble()),
+      minY: _minValue.isFinite ? _minValue : 0,
+      maxY: (_maxValue.isFinite && _maxValue > _minValue)
+          ? _maxValue
+          : (_minValue.isFinite ? _minValue + 1 : 1),
       lineBarsData: [
         _buildPortfolioLine(),
         _buildInvestmentLine(),
@@ -1486,8 +2019,12 @@ class _PortfolioChartState extends State<PortfolioChart>
       spots: _portfolioData
           .asMap()
           .entries
-          .map((entry) =>
-          FlSpot(entry.key.toDouble(), entry.value.portfolioValue))
+          .map((entry) => FlSpot(
+                entry.key.toDouble(),
+                entry.value.portfolioValue.isFinite
+                    ? entry.value.portfolioValue
+                    : 0,
+              ))
           .toList(),
       isCurved: true,
       color: _portfolioColor,
@@ -1509,10 +2046,36 @@ class _PortfolioChartState extends State<PortfolioChart>
       dotData: FlDotData(
         show: true,
         getDotPainter: (spot, percent, barData, index) {
+          final isHovered = _hoveredIndex == index;
+          if (index < 0 || index >= _portfolioData.length) {
+            return FlDotCirclePainter(radius: 0, color: Colors.transparent);
+          }
+          if (kUseNiceChartAxes) {
+            final cluster = _clusterByIndex[index.toInt()];
+            if (cluster == null) {
+              return FlDotCirclePainter(radius: 0, color: Colors.transparent);
+            }
+            final hasPurchases = cluster.purchases.isNotEmpty;
+            final hasSales = cluster.sales.isNotEmpty;
+            final count = cluster.tradeCount;
+            final radius = (isHovered ? 7.0 : 5.0) + math.min(4.0, math.log(count + 1));
+            return CustomDotPainter(
+              radius: radius,
+              color: hasPurchases && !hasSales
+                  ? _purchaseDotColor
+                  : (!hasPurchases && hasSales ? _saleDotColor : _purchaseDotColor),
+              strokeWidth: isHovered ? 3 : 2,
+              strokeColor: isHovered ? Colors.white : (hasSales && hasPurchases ? _saleDotColor : Colors.transparent),
+              hasSale: hasSales && hasPurchases,
+              saleDotColor: _saleDotColor,
+              saleDotRadius: isHovered ? 3 : 1.5,
+              badge: count > 1 ? (count > 99 ? '99+' : '$count') : null,
+            );
+          }
+
           final dataPoint = _portfolioData[index.toInt()].date;
           final isPurchaseDate = _isPurchaseDate(dataPoint);
           final isSaleDate = _isSaleDate(dataPoint);
-          final isHovered = _hoveredIndex == index;
 
           final isPureSaleDate = isSaleDate && !isPurchaseDate;
 
@@ -1562,8 +2125,12 @@ class _PortfolioChartState extends State<PortfolioChart>
       spots: _portfolioData
           .asMap()
           .entries
-          .map((entry) =>
-          FlSpot(entry.key.toDouble(), entry.value.investmentValue))
+          .map((entry) => FlSpot(
+                entry.key.toDouble(),
+                entry.value.investmentValue.isFinite
+                    ? entry.value.investmentValue
+                    : 0,
+              ))
           .toList(),
       isCurved: true,
       color: _investmentColor.withOpacity(0.6),
@@ -1579,71 +2146,72 @@ class _PortfolioChartState extends State<PortfolioChart>
         symbol: _getCurrencySymbol(widget.currency),
         decimalDigits: _getDecimalDigits(widget.currency, widget.portfolioValue));
     return Column(children: [
-      Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          _buildLegendItem('Stack Value', _portfolioColor),
-          SizedBox(width: 12),
-          _buildLegendItem('Total Investment', _investmentColor),
-          SizedBox(width: 12),
-          _buildLegendItem('Purchases', _purchaseDotColor),
-          SizedBox(width: 12),
-          _buildLegendItem('Sales', _saleDotColor),
-        ],
+      FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildLegendItem('Stack Value', _portfolioColor),
+            const SizedBox(width: 12),
+            _buildLegendItem('Total Investment', _investmentColor),
+            const SizedBox(width: 12),
+            _buildLegendItem('Purchases', _purchaseDotColor),
+            const SizedBox(width: 12),
+            _buildLegendItem('Sales', _saleDotColor),
+          ],
+        ),
       ),
       SizedBox(height: 16),
       LayoutBuilder(builder: (context, constraints) {
         final isWide = constraints.maxWidth > 400;
         return isWide
             ? Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            _buildDetailItem('Total BTC',
-                widget.holdingsHidden ? '****' : '${_totalBTC.toStringAsFixed(8)}', widget.isDarkMode),
-            _buildDetailItem(
+            Expanded(child: _buildDetailItem('Total BTC',
+                widget.holdingsHidden ? '****' : '${_totalBTC.toStringAsFixed(8)}', widget.isDarkMode)),
+            Expanded(child: _buildDetailItem(
                 'Avg Purchase Price',
                 widget.holdingsHidden
                     ? '****'
                     : priceFormat.format(_averagePurchasePrice),
-                widget.isDarkMode),
-            _buildDetailItem('Purchases', '${widget.purchases.length}', widget.isDarkMode),
-            _buildDetailItem('Sales', '${widget.sales.length}', widget.isDarkMode),
-            _buildDetailItem(
+                widget.isDarkMode)),
+            Expanded(child: _buildDetailItem('Purchases', '${widget.purchases.length}', widget.isDarkMode)),
+            Expanded(child: _buildDetailItem('Sales', '${widget.sales.length}', widget.isDarkMode)),
+            Expanded(child: _buildDetailItem(
                 'ROI',
                 widget.holdingsHidden
                     ? '****%'
                     : '${widget.profitLossPercentage.toStringAsFixed(2)}%',
                 widget.isDarkMode,
-                valueColor: profitLossColor),
+                valueColor: profitLossColor)),
           ],
         )
             : Column(children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              _buildDetailItem('Total BTC',
-                  widget.holdingsHidden ? '****' : '${_totalBTC.toStringAsFixed(8)}', widget.isDarkMode),
-              _buildDetailItem(
+              Expanded(child: _buildDetailItem('Total BTC',
+                  widget.holdingsHidden ? '****' : '${_totalBTC.toStringAsFixed(8)}', widget.isDarkMode)),
+              Expanded(child: _buildDetailItem(
                   'Avg Price',
                   widget.holdingsHidden
                       ? '****'
                       : priceFormat.format(_averagePurchasePrice),
-                  widget.isDarkMode),
+                  widget.isDarkMode)),
             ],
           ),
           SizedBox(height: 8),
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              _buildDetailItem('Purchases', '${widget.purchases.length}', widget.isDarkMode),
-              _buildDetailItem('Sales', '${widget.sales.length}', widget.isDarkMode),
-              _buildDetailItem(
+              Expanded(child: _buildDetailItem('Purchases', '${widget.purchases.length}', widget.isDarkMode)),
+              Expanded(child: _buildDetailItem('Sales', '${widget.sales.length}', widget.isDarkMode)),
+              Expanded(child: _buildDetailItem(
                   'ROI',
                   widget.holdingsHidden
                       ? '****%'
                       : '${widget.profitLossPercentage.toStringAsFixed(2)}%',
                   widget.isDarkMode,
-                  valueColor: profitLossColor),
+                  valueColor: profitLossColor)),
             ],
           ),
         ]);
@@ -1660,29 +2228,39 @@ class _PortfolioChartState extends State<PortfolioChart>
         Text(label,
             style: TextStyle(
                 fontSize: 12,
-                color: isDarkMode ? Colors.white54 : Colors.black54)),
+                color: isDarkMode ? Colors.white54 : Colors.black54),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center),
         SizedBox(height: 4),
-        Text(value,
-            style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: valueColor ?? defaultColor)),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(value,
+              style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: valueColor ?? defaultColor),
+              maxLines: 1),
+        ),
       ],
     );
   }
 
   Widget _buildLegendItem(String text, Color color) {
-    return Row(children: [
-      Container(
-          width: 12,
-          height: 12,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-      SizedBox(width: 6),
-      Text(text,
-          style: TextStyle(
-              fontSize: 12,
-              color: widget.isDarkMode ? Colors.white70 : Colors.black54)),
-    ]);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+            width: 12,
+            height: 12,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+        const SizedBox(width: 6),
+        Text(text,
+            style: TextStyle(
+                fontSize: 12,
+                color: widget.isDarkMode ? Colors.white70 : Colors.black54)),
+      ],
+    );
   }
 
   Widget _buildEmptyState() {
@@ -1746,10 +2324,12 @@ class _PortfolioChartState extends State<PortfolioChart>
 
   double _getPriceInterval(double minPrice, double maxPrice) {
     final priceRange = maxPrice - minPrice;
-    if (priceRange <= 0) return 1000;
+    if (!priceRange.isFinite || priceRange <= 0) return 1000;
     final double roughInterval = priceRange / 5;
-    final double magnitude =
-    math.pow(10, (math.log(roughInterval) / math.ln10).floor()).toDouble();
+    if (!roughInterval.isFinite || roughInterval <= 0) return 1000;
+    final logVal = math.log(roughInterval) / math.ln10;
+    if (!logVal.isFinite) return 1000;
+    final double magnitude = math.pow(10, logVal.floor()).toDouble();
     final double remainder = roughInterval / magnitude;
     if (remainder < 1.5) return 1 * magnitude;
     else if (remainder < 3) return 2 * magnitude;
@@ -1758,8 +2338,19 @@ class _PortfolioChartState extends State<PortfolioChart>
   }
 
   String _formatChartDate(DateTime date) {
-    final now = DateTime.now();
     final dataLength = _portfolioData.length;
+    if (kUseNiceChartAxes) {
+      switch (_selectedTimeRange) {
+        case PortfolioTimeRange.MONTH_1:
+          return DateFormat('d MMM').format(date);
+        case PortfolioTimeRange.MONTH_6:
+        case PortfolioTimeRange.YEAR_1:
+          return DateFormat('MMM yy').format(date);
+        case PortfolioTimeRange.YEAR_3:
+        case PortfolioTimeRange.MAX:
+          return DateFormat('yyyy').format(date);
+      }
+    }
     switch (_selectedTimeRange) {
       case PortfolioTimeRange.MONTH_1:
         return DateFormat('d MMM').format(date);
@@ -1788,6 +2379,16 @@ class _PortfolioChartState extends State<PortfolioChart>
     String symbol = _getCurrencySymbol(currency);
     final absPrice = price.abs();
     final sign = price < 0 ? '-' : '';
+    if (kUseNiceChartAxes) {
+      if (absPrice >= 1000000) {
+        return '$sign$symbol${_trimAxisDecimal(absPrice / 1000000)}M';
+      }
+      if (absPrice >= 1000) {
+        return '$sign$symbol${_trimAxisDecimal(absPrice / 1000)}K';
+      }
+      if (absPrice >= 1) return '$sign$symbol${absPrice.toStringAsFixed(0)}';
+      return '$sign$symbol${absPrice.toStringAsFixed(2)}';
+    }
     if (absPrice >= 1000000)
       return '$sign$symbol${(absPrice / 1000000).toStringAsFixed(1)}M';
     else if (absPrice >= 1000)
@@ -1796,6 +2397,13 @@ class _PortfolioChartState extends State<PortfolioChart>
       return '$sign$symbol${absPrice.toStringAsFixed(0)}';
     else
       return '$sign$symbol${absPrice.toStringAsFixed(2)}';
+  }
+
+  String _trimAxisDecimal(double value) {
+    if (value >= 10 || (value - value.round()).abs() < 0.05) {
+      return value.round().toString();
+    }
+    return value.toStringAsFixed(1);
   }
 
   int _getDecimalDigits(Currency currency, double price) {
@@ -1825,6 +2433,83 @@ class _PortfolioChartState extends State<PortfolioChart>
   }
 }
 
+class _TradeCluster {
+  final int index;
+  final String title;
+  final List<Purchase> purchases = [];
+  final List<Sale> sales = [];
+
+  _TradeCluster({required this.index, required this.title});
+
+  int get tradeCount => purchases.length + sales.length;
+}
+
+class _ActivityStripPainter extends CustomPainter {
+  final List<int> buys;
+  final List<int> sells;
+  final Color buyColor;
+  final Color sellColor;
+
+  _ActivityStripPainter({
+    required this.buys,
+    required this.sells,
+    required this.buyColor,
+    required this.sellColor,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final n = buys.length;
+    if (n == 0 || size.width <= 0) return;
+    var maxCount = 0;
+    for (var i = 0; i < n; i++) {
+      final total = buys[i] + sells[i];
+      if (total > maxCount) maxCount = total;
+    }
+    if (maxCount == 0) {
+      final axis = Paint()
+        ..color = sellColor.withOpacity(0.15)
+        ..strokeWidth = 1;
+      canvas.drawLine(Offset(0, size.height - 0.5), Offset(size.width, size.height - 0.5), axis);
+      return;
+    }
+    final barWidth = size.width / n;
+    for (var i = 0; i < n; i++) {
+      final buy = buys[i];
+      final sell = sells[i];
+      final total = buy + sell;
+      if (total == 0) continue;
+      final height = (total / maxCount) * size.height;
+      final buyHeight = total == 0 ? 0.0 : height * (buy / total);
+      final x = i * barWidth + barWidth * 0.15;
+      final w = barWidth * 0.7;
+      if (buy > 0) {
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromLTWH(x, size.height - buyHeight, w, buyHeight),
+            const Radius.circular(1),
+          ),
+          Paint()..color = buyColor,
+        );
+      }
+      if (sell > 0) {
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromLTWH(x, size.height - height, w, height - buyHeight),
+            const Radius.circular(1),
+          ),
+          Paint()..color = sellColor,
+        );
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _ActivityStripPainter oldDelegate) {
+    return oldDelegate.buys != buys || oldDelegate.sells != sells;
+  }
+}
+
 class CustomDotPainter extends FlDotPainter {
   final double radius;
   final Color color;
@@ -1833,6 +2518,7 @@ class CustomDotPainter extends FlDotPainter {
   final bool hasSale;
   final Color saleDotColor;
   final double saleDotRadius;
+  final String? badge;
 
   CustomDotPainter({
     required this.radius,
@@ -1842,6 +2528,7 @@ class CustomDotPainter extends FlDotPainter {
     this.hasSale = false,
     this.saleDotColor = Colors.purple,
     this.saleDotRadius = 1.5,
+    this.badge,
   });
 
   @override
@@ -1865,6 +2552,25 @@ class CustomDotPainter extends FlDotPainter {
         ..style = PaintingStyle.fill;
       canvas.drawCircle(offsetInCanvas, saleDotRadius, innerPaint);
     }
+
+    if (badge != null && badge!.isNotEmpty) {
+      final textPainter = TextPainter(
+        text: TextSpan(
+          text: badge,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 8,
+            fontWeight: FontWeight.w700,
+            height: 1,
+          ),
+        ),
+        textDirection: ui.TextDirection.ltr,
+      )..layout();
+      textPainter.paint(
+        canvas,
+        offsetInCanvas.translate(-textPainter.width / 2, -textPainter.height / 2),
+      );
+    }
   }
 
   @override
@@ -1874,7 +2580,7 @@ class CustomDotPainter extends FlDotPainter {
 
   @override
   List<Object?> get props =>
-      [radius, color, strokeWidth, strokeColor, hasSale, saleDotColor, saleDotRadius];
+      [radius, color, strokeWidth, strokeColor, hasSale, saleDotColor, saleDotRadius, badge];
 }
 
 class PortfolioDataPoint {

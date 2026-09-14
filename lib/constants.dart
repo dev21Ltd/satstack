@@ -49,3 +49,18 @@ String formatDenomination(double btcAmount, Denomination denomination) {
     return '${numberFormat.format(sats)} sats';
   }
 }
+
+/// Convert a fiat amount between currencies using live BTC prices as FX.
+/// This is current-rate conversion, not historical purchase-date FX.
+double convertViaBtc(
+  double amount,
+  Currency from,
+  Currency to,
+  Map<Currency, double> btcPrices,
+) {
+  if (from == to) return amount;
+  final fromPrice = btcPrices[from] ?? 0.0;
+  final toPrice = btcPrices[to] ?? 0.0;
+  if (fromPrice == 0 || toPrice == 0) return amount;
+  return (amount / fromPrice) * toPrice;
+}

@@ -4,14 +4,23 @@
 
 SatStack is an open source, privacy-focused Bitcoin portfolio tracker. All data stays on your device - no accounts, no tracking, no cloud storage.
 
+## What's new in 1.0.2
+
+- Stronger on-device security: hashed PIN, lockout, Hive boxes stay closed until unlock, Android backup off, screenshots blocked.
+- Clearer portfolio chart (calendar dates, clusters, 3-year range) and trade-date currency conversion when history is available.
+- JSON, CSV, and PDF exports are plaintext. The app warns that anyone with the file can read your trades.
+- JSON backup is a simple file again (save / import, no extra password).
+
+Full notes: [CHANGELOG.md](CHANGELOG.md)
+
 ## ✨ Features
 
 - 🔒 **Privacy First**: No data collection, local-only storage
 - 📊 **Portfolio Tracking**: Track Bitcoin purchases & sales
 - 💰 **Multiple Currencies**: USD, GBP, EUR, CAD, AUD, JPY, CNY
 - 📈 **Real-time Prices**: Live Bitcoin price updates
-- 🔐 **Security**: PIN protection, encrypted storage
-- 📱 **Cross-platform**: iOS, Android, Web
+- 🔐 **Security**: PIN wraps the Hive AES key; boxes stay closed until unlock
+- 📱 **Platforms**: Android is the supported mobile target in this tree. Web compiles. iOS is not maintained here.
 - 📤 **Export**: CSV, PDF, JSON exports
 - 🎨 **Themes**: Dark/Light mode
 
@@ -64,7 +73,6 @@ satstack/
 
 ### What We DON'T Do:
 ❌ No data collection
-❌ No data collection
 
 ❌ No analytics or tracking
 
@@ -73,11 +81,15 @@ satstack/
 ❌ No third-party sharing
 
 ### What We Do:
-✅ All data encrypted locally (AES-256)
+✅ Hive AES encryption of purchases, sales, and preferences
 
-✅ Optional PIN protection
+✅ PIN hashes (not plaintext) plus lockout
 
-✅ Auto-lock after inactivity
+✅ PIN wraps the Hive key; storage is not opened until unlock
+
+✅ Auto-lock closes encrypted boxes
+
+JSON/CSV/PDF exports are plaintext files.
 
 ✅ Open source for auditability
 

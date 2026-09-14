@@ -1,6 +1,6 @@
 name: satstack
 description: "Bitcoin stack tracker"
-version: 1.0.1+6
+version: 1.0.2+8
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -16,13 +16,13 @@ dependencies:
   font_awesome_flutter: ^10.5.0
   path_provider: ^2.1.1
   share_plus: ^7.2.1
+  cross_file: ^0.3.3
   cupertino_icons: ^1.0.8
   provider: ^6.0.5
   connectivity_plus: ^5.0.0
   flutter_animate: ^4.1.1+1
-  permission_handler: ^11.0.1
-  local_auth: ^2.1.5
   flutter_secure_storage: ^8.0.0
+  crypto: ^3.0.3
   pin_code_fields: ^7.4.0
   pull_to_refresh: ^2.0.0
   fluttertoast: ^8.2.2
@@ -34,11 +34,11 @@ dependencies:
   syncfusion_flutter_pdf: ^23.1.44
   csv: ^5.0.3
   open_file: ^3.3.3
-  excel: ^2.0.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  flutter_lints: ^3.0.0
   hive_generator: ^2.0.1
   build_runner: ^2.4.6
   flutter_launcher_icons: ^0.13.1

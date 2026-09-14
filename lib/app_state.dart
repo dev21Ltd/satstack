@@ -1,10 +1,14 @@
 // app_state.dart - COMPLETE FIXED VERSION WITH PRECISE CURRENCY CONVERSION
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:hive/hive.dart';
 import 'package:intl/intl.dart';
 import 'models.dart';
 import 'services.dart';
 import 'constants.dart';
+import 'historical_fx.dart';
+import 'portfolio_math.dart';
 
 class AppState with ChangeNotifier {
   final StorageService _storageService = StorageService();
@@ -38,6 +42,9 @@ class AppState with ChangeNotifier {
   Map<String, List<PriceDataPoint>> _historicalDataCache = {};
   Map<String, DateTime> _historicalDataCacheTimestamps = {};
   bool _holdingsHidden = false;
+  bool _bootstrapped = false;
+  bool _notificationsPaused = false;
+  final HistoricalFx _historicalFx = HistoricalFx();
 
   // Getters
   Currency get selectedCurrency => _selectedCurrency;
@@ -61,79 +68,42 @@ class AppState with ChangeNotifier {
   Currency get secondaryCurrency => _secondaryCurrency;
   bool get holdingsHidden => _holdingsHidden;
 
-  // Calculate total BTC (purchases minus sales)
-  double get totalBTC => _purchases.fold(0.0, (sum, p) => sum + p.amountBTC) -
-      _sales.fold(0.0, (sum, s) => sum + s.amountBTC);
+  double get totalBTC => netBtcHoldings(_purchases, _sales);
 
-  // Calculate total crypto from purchases only
-  double get totalCrypto => _purchases.fold(0.0, (sum, p) => sum + p.amountBTC);
+  double get totalCrypto => totalPurchasedBtc(_purchases);
 
-  // FIXED: Total investment in selected currency
-  double get totalInvestment {
-    return _purchases.fold(0.0, (sum, purchase) {
-      // Convert each purchase from its original currency to selected currency
-      double purchaseValueInSelectedCurrency = _convertCurrency(
-          purchase.totalCashSpent,
-          purchase.cashCurrency,
-          _selectedCurrency
+  double get totalInvestment =>
+      totalInvestmentInCurrency(
+        _purchases,
+        _selectedCurrency,
+        _btcPrices,
+        pricesOnDate: pricesOnDate,
       );
-      return sum + purchaseValueInSelectedCurrency;
-    });
-  }
 
-  // FIXED: Portfolio value in selected currency
-  double get portfolioValue => totalBTC * getBtcPrice(_selectedCurrency);
+  double get portfolioValue =>
+      portfolioValueInCurrency(totalBTC, _selectedCurrency, _btcPrices);
 
-  // FIXED: Average purchase price in selected currency
-  double get averagePrice {
-    if (totalCrypto == 0) return 0;
-
-    double totalInvestmentInSelectedCurrency = _purchases.fold(0.0, (sum, purchase) {
-      double purchaseValueInSelectedCurrency = _convertCurrency(
-          purchase.totalCashSpent,
-          purchase.cashCurrency,
-          _selectedCurrency
+  double get averagePrice =>
+      averagePurchasePriceInCurrency(
+        _purchases,
+        _selectedCurrency,
+        _btcPrices,
+        pricesOnDate: pricesOnDate,
       );
-      return sum + purchaseValueInSelectedCurrency;
-    });
 
-    return totalInvestmentInSelectedCurrency / totalCrypto;
-  }
-
-  // FIXED: Profit/Loss in selected currency
-  double get profitLoss {
-    double currentValue = portfolioValue;
-    double totalInvestmentValue = totalInvestment;
-
-    // FIXED: Sales value in selected currency with proper conversion
-    double totalSalesValueInSelectedCurrency = _sales.fold(0.0, (sum, sale) {
-      double saleValueInSelectedCurrency = _convertCurrency(
-          sale.amountBTC * sale.price,
-          sale.originalCurrency,
-          _selectedCurrency
+  double get profitLoss => profitLossInCurrency(
+        purchases: _purchases,
+        sales: _sales,
+        currency: _selectedCurrency,
+        btcPrices: _btcPrices,
+        pricesOnDate: pricesOnDate,
       );
-      return sum + saleValueInSelectedCurrency;
-    });
 
-    return currentValue + totalSalesValueInSelectedCurrency - totalInvestmentValue;
-  }
+  double get profitLossPercentage =>
+      profitLossPercent(profitLoss, totalInvestment);
 
-  // FIXED: Profit/Loss percentage
-  double get profitLossPercentage {
-    double investment = totalInvestment;
-    if (investment == 0) return 0;
-    return (profitLoss / investment) * 100;
-  }
-
-  // FIXED: Get sales value in selected currency
-  double get totalSalesValue => _sales.fold(0.0, (sum, sale) {
-    double saleValueInSelectedCurrency = _convertCurrency(
-        sale.amountBTC * sale.price,
-        sale.originalCurrency,
-        _selectedCurrency
-    );
-    return sum + saleValueInSelectedCurrency;
-  });
+  double get totalSalesValue =>
+      totalSalesProceedsInCurrency(_sales, _selectedCurrency, _btcPrices);
 
   // NEW: Format sensitive values based on holdings hidden state
   String formatSensitiveValue(double value, {String? currency, bool isBtc = false}) {
@@ -173,14 +143,39 @@ class AppState with ChangeNotifier {
     return NumberFormat('#,###.##').format(number);
   }
 
-  AppState() {
-    print('AppState initialized - starting data load');
-    _loadInitialData();
-    _loadThemePreference();
-    _loadDenominationPreference();
+  AppState();
+
+  Map<Currency, double> pricesOnDate(DateTime date) {
+    return _historicalFx.pricesOn(date, _btcPrices);
+  }
+
+  Future<void> bootstrap() async {
+    if (_bootstrapped) {
+      await reloadAllData();
+      return;
+    }
+    _bootstrapped = true;
+    await _loadInitialData();
+    await _loadThemePreference();
+    await _loadDenominationPreference();
+  }
+
+  void dropSessionData() {
+    _purchases = [];
+    _sales = [];
+    _isLoading = true;
+    _bootstrapped = false;
+    notifyListeners();
+  }
+
+  @override
+  void notifyListeners() {
+    if (_notificationsPaused) return;
+    super.notifyListeners();
   }
 
   Future<void> reloadAllData() async {
+    _notificationsPaused = true;
     try {
       print('Reloading all data...');
       await _loadPurchases();
@@ -192,10 +187,11 @@ class AppState with ChangeNotifier {
       await fetchBtcPrices();
       await fetchHistoricalData();
       print('Data reload completed successfully');
-      notifyListeners();
     } catch (e) {
       _lastError = 'Failed to reload data: ${e.toString()}';
       print('Error reloading data: $e');
+    } finally {
+      _notificationsPaused = false;
       notifyListeners();
     }
   }
@@ -216,13 +212,14 @@ class AppState with ChangeNotifier {
 
   Future<void> _loadThemePreference() async {
     final box = Hive.box('preferences');
-    _isDarkMode = box.get('isDarkMode', defaultValue: true);
+    _isDarkMode = box.get('isDarkMode', defaultValue: true) == true;
     notifyListeners();
   }
 
   Future<void> _loadDenominationPreference() async {
     final box = Hive.box('preferences');
-    int index = box.get('denomination', defaultValue: 0);
+    final raw = box.get('denomination', defaultValue: 0);
+    final index = (raw is num ? raw.toInt() : 0).clamp(0, Denomination.values.length - 1);
     _denomination = Denomination.values[index];
     notifyListeners();
   }
@@ -247,8 +244,13 @@ class AppState with ChangeNotifier {
       await _loadSales();
       await _loadCurrencyPreferences();
       await _loadHoldingsHiddenPreference();
+      _historicalFx.loadFromBox();
+      _restoreCachedPricesIfNeeded();
       await fetchBtcPrices();
       await fetchHistoricalData();
+      unawaited(_historicalFx.refreshFromNetwork().then((_) {
+        notifyListeners();
+      }));
       _isLoading = false;
       print('Initial data load completed');
       notifyListeners();
@@ -316,31 +318,29 @@ class AppState with ChangeNotifier {
       notifyListeners();
 
       final prices = await ApiService.fetchBtcPrices();
-      _btcPrices = {
-        Currency.USD: prices['usd'] ?? 0,
-        Currency.GBP: prices['gbp'] ?? 0,
-        Currency.EUR: prices['eur'] ?? 0,
-        Currency.CAD: prices['cad'] ?? 0,
-        Currency.AUD: prices['aud'] ?? 0,
-        Currency.JPY: prices['jpy'] ?? 0,
-        Currency.CNY: prices['cny'] ?? 0,
-      };
+      _applyBtcPrices(prices);
       _lastUpdated = DateTime.now();
+      await StorageService.saveCachedBtcPrices(prices);
     } on RateLimitException {
       _hasPriceError = true;
       _lastPriceError = 'Too many requests. Please wait a minute.';
+      _restoreCachedPricesIfNeeded();
     } on NetworkException {
       _hasPriceError = true;
       _lastPriceError = 'Network issue';
+      _restoreCachedPricesIfNeeded();
     } on ApiTimeoutException {
       _hasPriceError = true;
       _lastPriceError = 'Request timed out';
+      _restoreCachedPricesIfNeeded();
     } on ApiException {
       _hasPriceError = true;
       _lastPriceError = 'API error';
+      _restoreCachedPricesIfNeeded();
     } catch (e) {
       _hasPriceError = true;
       _lastPriceError = 'Unexpected error';
+      _restoreCachedPricesIfNeeded();
     } finally {
       _isRefreshing = false;
       notifyListeners();
@@ -510,8 +510,15 @@ class AppState with ChangeNotifier {
 
   Future<void> _loadCurrencyPreferences() async {
     final box = Hive.box('preferences');
-    _favoriteCurrency = Currency.values[box.get('favoriteCurrency', defaultValue: 0)];
-    _secondaryCurrency = Currency.values[box.get('secondaryCurrency', defaultValue: 1)];
+    final favoriteRaw = box.get('favoriteCurrency', defaultValue: 0);
+    final secondaryRaw = box.get('secondaryCurrency', defaultValue: 1);
+    final favoriteIndex = (favoriteRaw is num ? favoriteRaw.toInt() : 0).clamp(0, Currency.values.length - 1);
+    var secondaryIndex = (secondaryRaw is num ? secondaryRaw.toInt() : 1).clamp(0, Currency.values.length - 1);
+    if (secondaryIndex == favoriteIndex) {
+      secondaryIndex = favoriteIndex == 0 ? 1 : 0;
+    }
+    _favoriteCurrency = Currency.values[favoriteIndex];
+    _secondaryCurrency = Currency.values[secondaryIndex];
     _selectedCurrency = _favoriteCurrency;
     notifyListeners();
   }
@@ -560,22 +567,38 @@ class AppState with ChangeNotifier {
     }
   }
 
-  // FIXED: Proper currency conversion using BTC as intermediary
-  double _convertCurrency(double amount, Currency from, Currency to) {
-    // Return original amount if currencies are the same
-    if (from == to) return amount;
-
-    final btcPriceFrom = _btcPrices[from] ?? 0.0;
-    final btcPriceTo = _btcPrices[to] ?? 0.0;
-
-    if (btcPriceFrom == 0 || btcPriceTo == 0) return amount;
-
-    // Convert: amount (in 'from' currency) -> BTC -> amount (in 'to' currency)
-    double amountInBTC = amount / btcPriceFrom;
-    return amountInBTC * btcPriceTo;
+  double _convertCurrency(double amount, Currency from, Currency to, {DateTime? date}) {
+    return convertViaBtc(
+      amount,
+      from,
+      to,
+      date != null ? pricesOnDate(date) : _btcPrices,
+    );
   }
 
-  // Helper method to get purchase value in selected currency
+  void _applyBtcPrices(Map<String, double> prices) {
+    _btcPrices = {
+      Currency.USD: prices['usd'] ?? 0,
+      Currency.GBP: prices['gbp'] ?? 0,
+      Currency.EUR: prices['eur'] ?? 0,
+      Currency.CAD: prices['cad'] ?? 0,
+      Currency.AUD: prices['aud'] ?? 0,
+      Currency.JPY: prices['jpy'] ?? 0,
+      Currency.CNY: prices['cny'] ?? 0,
+    };
+  }
+
+  void _restoreCachedPricesIfNeeded() {
+    if (_btcPrices.values.any((price) => price > 0)) return;
+    final cached = StorageService.loadCachedBtcPrices();
+    if (cached == null) return;
+    _applyBtcPrices(cached);
+    final cachedAt = StorageService.loadCachedBtcPricesAt();
+    if (cachedAt != null) {
+      _lastUpdated = cachedAt;
+    }
+  }
+
   double getPurchaseValueInSelectedCurrency(Purchase purchase) {
     return _convertCurrency(
         purchase.totalCashSpent,
@@ -584,7 +607,6 @@ class AppState with ChangeNotifier {
     );
   }
 
-  // Helper method to get purchase price per BTC in selected currency
   double getPurchasePricePerBTCInSelectedCurrency(Purchase purchase) {
     return _convertCurrency(
         purchase.pricePerBTC,
@@ -593,7 +615,6 @@ class AppState with ChangeNotifier {
     );
   }
 
-  // Helper method to get sale value in selected currency
   double getSaleValueInSelectedCurrency(Sale sale) {
     return _convertCurrency(
         sale.amountBTC * sale.price,

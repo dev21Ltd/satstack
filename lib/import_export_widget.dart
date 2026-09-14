@@ -6,12 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:cross_file/cross_file.dart';
 import 'services.dart';
-import 'dart:io'; // ADD THIS IMPORT
 import 'dart:typed_data';
-import 'app_state.dart';
-import 'package:provider/provider.dart';
-import 'package:open_file/open_file.dart';
-import 'package:file_picker/file_picker.dart';
 
 class ThousandsSeparatorInputFormatter extends TextInputFormatter {
   @override
@@ -73,6 +68,7 @@ class _ImportExportDialogState extends State<ImportExportDialog> with SingleTick
   }
 
   void _handleExportComplete(String filePath, String operationType) {
+    if (!mounted) return;
     setState(() { _hasExported = true; _lastExportPath = filePath; });
     if (operationType == 'PDF Export' || operationType == 'CSV Export' || operationType == 'JSON Export') {
       widget.onOperationComplete(operationType, filePath);
@@ -127,7 +123,7 @@ class _ImportExportDialogState extends State<ImportExportDialog> with SingleTick
   Future<void> _batchShareFiles() async {
     if (_selectedFiles.isEmpty) return;
     try {
-      final storageService = StorageService(); List<XFile> filesToShare = [];
+      final List<XFile> filesToShare = [];
       for (String filePath in _selectedFiles) filesToShare.add(XFile(filePath));
       await Share.shareXFiles(filesToShare, text: 'SatStack Export - ${DateFormat('yyyy-MM-dd').format(DateTime.now())}');
     } catch (e) {
@@ -144,7 +140,7 @@ class _ImportExportDialogState extends State<ImportExportDialog> with SingleTick
         try {
           final file = _exportedFiles.firstWhere((f) => f['path'] == filePath);
           final fileName = file['name'] as String;
-          final fileBytes = await File(filePath).readAsBytes();
+          final fileBytes = Uint8List.fromList(await storageService.readExportedFileBytes(filePath));
           await storageService.saveFileToLocation(fileBytes, fileName);
           successCount++;
         } catch (e) {
@@ -173,19 +169,22 @@ class _ImportExportDialogState extends State<ImportExportDialog> with SingleTick
       backgroundColor: widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.0)),
       insetPadding: const EdgeInsets.all(16.0),
-      child: ConstrainedBox(constraints: BoxConstraints(maxHeight: screenHeight * 0.8, maxWidth: screenWidth * 0.95),
-        child: Padding(padding: const EdgeInsets.all(16.0), child: Column(mainAxisSize: MainAxisSize.min, children: [
+      child: SizedBox(
+        height: screenHeight * 0.8,
+        width: screenWidth * 0.95,
+        child: Padding(padding: const EdgeInsets.all(16.0), child: Column(children: [
           Row(mainAxisAlignment: MainAxisAlignment.center, children: [
             Icon(Icons.import_export, color: const Color(0xFFF7931A), size: isSmallScreen ? 20 : 24),
             const SizedBox(width: 8),
-            Text('Import & Export', style: TextStyle(color: widget.isDarkMode ? Colors.white : Colors.black, fontWeight: FontWeight.bold, fontSize: isSmallScreen ? 18 : 20)),
+            Flexible(child: Text('Import & Export', style: TextStyle(color: widget.isDarkMode ? Colors.white : Colors.black, fontWeight: FontWeight.bold, fontSize: isSmallScreen ? 18 : 20), overflow: TextOverflow.ellipsis)),
           ]),
           const SizedBox(height: 16),
           Container(decoration: BoxDecoration(color: widget.isDarkMode ? Colors.grey[800] : Colors.grey[200], borderRadius: BorderRadius.circular(8.0)),
             child: TabBar(controller: _tabController, indicator: BoxDecoration(borderRadius: BorderRadius.circular(8.0), color: const Color(0xFFF7931A)),
               labelColor: Colors.black, unselectedLabelColor: widget.isDarkMode ? Colors.white70 : Colors.black54,
-              labelStyle: TextStyle(fontSize: isSmallScreen ? 12 : 14, fontWeight: FontWeight.w600),
-              unselectedLabelStyle: TextStyle(fontSize: isSmallScreen ? 12 : 14), indicatorSize: TabBarIndicatorSize.tab,
+              labelStyle: TextStyle(fontSize: isSmallScreen ? 11 : 14, fontWeight: FontWeight.w600),
+              unselectedLabelStyle: TextStyle(fontSize: isSmallScreen ? 11 : 14), indicatorSize: TabBarIndicatorSize.tab,
+              labelPadding: const EdgeInsets.symmetric(horizontal: 8),
               tabs: const [Tab(text: 'Export'), Tab(text: 'Import'), Tab(text: 'My Files'), Tab(text: 'Guide')],
             ),
           ),
@@ -272,15 +271,15 @@ class _ImportExportDialogState extends State<ImportExportDialog> with SingleTick
         child: Row(children: [
           Icon(Icons.security, color: Colors.green, size: isSmallScreen ? 16 : 18),
           const SizedBox(width: 8),
-          Expanded(child: Text('For maximum security, store backups on encrypted external storage devices', style: TextStyle(color: widget.isDarkMode ? Colors.green[100] : Colors.green[800], fontSize: isSmallScreen ? 12 : 14, fontWeight: FontWeight.w500))),
+          Expanded(child: Text('JSON, CSV, and PDF exports are plaintext — anyone with the file can read your trades. Store copies on encrypted storage and treat them like financial documents.', style: TextStyle(color: widget.isDarkMode ? Colors.green[100] : Colors.green[800], fontSize: isSmallScreen ? 12 : 14, fontWeight: FontWeight.w500))),
         ]),
       ),
       const SizedBox(height: 16),
       Text('Supported Formats:', style: TextStyle(fontSize: isSmallScreen ? 16 : 18, fontWeight: FontWeight.w600, color: widget.isDarkMode ? Colors.white : Colors.black)),
       const SizedBox(height: 12),
-      _buildFormatItem('PDF Report', 'Professional document with portfolio overview', Icons.picture_as_pdf, Colors.red, isSmallScreen),
-      const SizedBox(height: 8), _buildFormatItem('CSV Backup', 'Universal spreadsheet format ideal for data backup and analysis', Icons.table_chart, Colors.green, isSmallScreen),
-      const SizedBox(height: 8), _buildFormatItem('JSON Backup', 'Complete app data backup including preferences and settings', Icons.code, Colors.purple, isSmallScreen),
+      _buildFormatItem('PDF Report', 'Printable overview. Plaintext — anyone with the file can read it.', Icons.picture_as_pdf, Colors.red, isSmallScreen),
+      const SizedBox(height: 8), _buildFormatItem('CSV Backup', 'Spreadsheet format for analysis. Plaintext — anyone with the file can read it.', Icons.table_chart, Colors.green, isSmallScreen),
+      const SizedBox(height: 8), _buildFormatItem('JSON Backup', 'Complete backup of trades and settings. Plaintext — anyone with the file can read it.', Icons.code, Colors.purple, isSmallScreen),
       const SizedBox(height: 16),
       Text('Backup Strategy:', style: TextStyle(fontSize: isSmallScreen ? 16 : 18, fontWeight: FontWeight.w600, color: widget.isDarkMode ? Colors.white : Colors.black)),
       const SizedBox(height: 12),
@@ -307,6 +306,7 @@ class _ImportExportDialogState extends State<ImportExportDialog> with SingleTick
             SizedBox(height: 4),
             Text('• All exported files are automatically saved to app storage for backup', style: TextStyle(fontSize: 12, color: widget.isDarkMode ? Colors.blue[100] : Colors.blue[800])), // UPDATED
             Text('• JSON preserves all your app settings and preferences', style: TextStyle(fontSize: 12, color: widget.isDarkMode ? Colors.blue[100] : Colors.blue[800])),
+            Text('• Exported files are not encrypted — keep them private', style: TextStyle(fontSize: 12, color: widget.isDarkMode ? Colors.blue[100] : Colors.blue[800])),
             Text('• You can save additional copies to any folder location on your device', style: TextStyle(fontSize: 12, color: widget.isDarkMode ? Colors.blue[100] : Colors.blue[800])), // UPDATED
           ],
         ),
@@ -359,28 +359,31 @@ class _ImportExportDialogState extends State<ImportExportDialog> with SingleTick
       Text('Export Your Data', style: TextStyle(fontSize: isSmallScreen ? 16 : 18, fontWeight: FontWeight.w600, color: widget.isDarkMode ? Colors.white : Colors.black)),
       const SizedBox(height: 8),
       Text(
-        'Save your portfolio data to any folder - a copy is automatically saved in app storage', // UPDATED
+        'JSON, CSV, and PDF files are plaintext — anyone with the file can read your trades.',
         style: TextStyle(fontSize: isSmallScreen ? 12 : 14, color: widget.isDarkMode ? Colors.white70 : Colors.black54),
         textAlign: TextAlign.center,
       ),
       const SizedBox(height: 20),
       Column(children: [
         _buildOption(icon: Icons.picture_as_pdf, title: 'Save PDF Report', color: Colors.red, onTap: () {
-          Navigator.of(context).pop(); widget.onSavePdfReport(context); _handleExportComplete('portfolio_report.pdf', 'PDF Export');
+          Navigator.of(context).pop();
+          widget.onSavePdfReport(context);
         }, isSmallScreen: isSmallScreen),
         const SizedBox(height: 12), _buildOption(icon: Icons.save, title: 'Save CSV Backup', color: Colors.green, onTap: () {
-          Navigator.of(context).pop(); widget.onSaveCsvReport(context); _handleExportComplete('portfolio_data.csv', 'CSV Export');
+          Navigator.of(context).pop();
+          widget.onSaveCsvReport(context);
         }, isSmallScreen: isSmallScreen),
         const SizedBox(height: 12), _buildOption(icon: Icons.backup, title: 'Save JSON Backup', color: Colors.purple, onTap: () {
-          Navigator.of(context).pop(); widget.onSaveJsonBackup(context); _handleExportComplete('satstack_backup.json', 'JSON Export');
+          Navigator.of(context).pop();
+          widget.onSaveJsonBackup(context);
         }, isSmallScreen: isSmallScreen),
       ]),
       const SizedBox(height: 16),
-      Container(padding: const EdgeInsets.all(12.0), decoration: BoxDecoration(color: widget.isDarkMode ? Colors.blue.withOpacity(0.1) : Colors.blue.withOpacity(0.1), borderRadius: BorderRadius.circular(8.0), border: Border.all(color: Colors.blue.withOpacity(0.3), width: 1)),
+      Container(padding: const EdgeInsets.all(12.0), decoration: BoxDecoration(color: widget.isDarkMode ? Colors.orange.withOpacity(0.1) : Colors.orange.withOpacity(0.1), borderRadius: BorderRadius.circular(8.0), border: Border.all(color: Colors.orange.withOpacity(0.3), width: 1)),
         child: Row(children: [
-          Icon(Icons.folder_open, color: Colors.blue, size: isSmallScreen ? 16 : 18),
+          Icon(Icons.warning_amber_rounded, color: Colors.orange, size: isSmallScreen ? 16 : 18),
           const SizedBox(width: 8),
-          Expanded(child: Text('You can save backup files to any folder on your device for better organization', style: TextStyle(color: widget.isDarkMode ? Colors.blue[100] : Colors.blue[800], fontSize: isSmallScreen ? 12 : 14, fontWeight: FontWeight.w500))),
+          Expanded(child: Text('Treat exports like financial documents. Store them somewhere only you can open.', style: TextStyle(color: widget.isDarkMode ? Colors.orange[100] : Colors.orange[800], fontSize: isSmallScreen ? 12 : 14, fontWeight: FontWeight.w500))),
         ]),
       ),
     ]));
@@ -396,7 +399,10 @@ class _ImportExportDialogState extends State<ImportExportDialog> with SingleTick
         _buildOption(icon: Icons.file_upload, title: 'CSV File', color: Colors.orange, onTap: () {
           Navigator.of(context).pop(); widget.onImportFromFile(context, 'csv');
         }, isSmallScreen: isSmallScreen),
-        const SizedBox(height: 12), _buildOption(icon: Icons.text_fields, title: 'JSON Text', color: Colors.teal, onTap: () {
+        const SizedBox(height: 12), _buildOption(icon: Icons.folder_open, title: 'JSON Backup File', color: Colors.purple, onTap: () {
+          Navigator.of(context).pop(); widget.onImportFromFile(context, 'json');
+        }, isSmallScreen: isSmallScreen),
+        const SizedBox(height: 12), _buildOption(icon: Icons.text_fields, title: 'Paste JSON', color: Colors.teal, onTap: () {
           Navigator.of(context).pop(); widget.onShowJsonImportDialog(context);
         }, isSmallScreen: isSmallScreen),
       ]),
@@ -413,13 +419,13 @@ class _ImportExportDialogState extends State<ImportExportDialog> with SingleTick
 
   Widget _buildFilesTab(bool isSmallScreen) {
     return Column(children: [
-      Padding(padding: const EdgeInsets.only(bottom: 16.0), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-        Text('Exported Files', style: TextStyle(fontSize: isSmallScreen ? 16 : 18, fontWeight: FontWeight.w600, color: widget.isDarkMode ? Colors.white : Colors.black)),
-        if (_isSelecting) Row(children: [
-          IconButton(icon: Icon(Icons.select_all, color: const Color(0xFFF7931A)), onPressed: _selectAll, tooltip: 'Select All'),
-          IconButton(icon: Icon(Icons.clear_all, color: const Color(0xFFF7931A)), onPressed: _clearSelection, tooltip: 'Clear Selection'),
-        ]),
-        IconButton(icon: Icon(_isSelecting ? Icons.done : Icons.checklist, color: const Color(0xFFF7931A)), onPressed: _toggleSelection, tooltip: _isSelecting ? 'Done Selecting' : 'Select Files'),
+      Padding(padding: const EdgeInsets.only(bottom: 16.0), child: Row(children: [
+        Expanded(child: Text('Exported Files', style: TextStyle(fontSize: isSmallScreen ? 16 : 18, fontWeight: FontWeight.w600, color: widget.isDarkMode ? Colors.white : Colors.black), overflow: TextOverflow.ellipsis)),
+        if (_isSelecting) ...[
+          IconButton(icon: Icon(Icons.select_all, color: const Color(0xFFF7931A)), onPressed: _selectAll, tooltip: 'Select All', visualDensity: VisualDensity.compact),
+          IconButton(icon: Icon(Icons.clear_all, color: const Color(0xFFF7931A)), onPressed: _clearSelection, tooltip: 'Clear Selection', visualDensity: VisualDensity.compact),
+        ],
+        IconButton(icon: Icon(_isSelecting ? Icons.done : Icons.checklist, color: const Color(0xFFF7931A)), onPressed: _toggleSelection, tooltip: _isSelecting ? 'Done Selecting' : 'Select Files', visualDensity: VisualDensity.compact),
       ])),
       if (_isSelecting && _selectedFiles.isNotEmpty) Container(padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16), decoration: BoxDecoration(color: widget.isDarkMode ? Colors.grey[800] : Colors.grey[200], borderRadius: BorderRadius.circular(8)),
         child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
@@ -489,8 +495,7 @@ class _ImportExportDialogState extends State<ImportExportDialog> with SingleTick
 
   Future<void> _saveFileToLocation(String filePath, String fileName) async {
     try {
-      final file = File(filePath);
-      final bytes = await file.readAsBytes();
+      final bytes = Uint8List.fromList(await StorageService().readExportedFileBytes(filePath));
       final storageService = StorageService();
       final result = await storageService.saveFileToLocation(bytes, fileName);
 

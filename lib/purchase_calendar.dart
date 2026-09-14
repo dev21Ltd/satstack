@@ -60,14 +60,12 @@ class _PurchaseCalendarState extends State<PurchaseCalendar> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _calculateBottomPadding();
-  }
-
-  void _calculateBottomPadding() {
-    final mediaQuery = MediaQuery.of(context);
-    final bottomPadding = mediaQuery.padding.bottom;
-    setState(() {
-      _bottomPadding = bottomPadding > 0 ? bottomPadding : 16;
+    final bottomPadding = MediaQuery.paddingOf(context).bottom;
+    final next = bottomPadding > 0 ? bottomPadding : 16.0;
+    if (next == _bottomPadding) return;
+    _bottomPadding = next;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(() {});
     });
   }
 
@@ -182,12 +180,7 @@ class _PurchaseCalendarState extends State<PurchaseCalendar> {
   }
 
   double _convertCurrency(double amount, Currency from, Currency to) {
-    if (from == to) return amount;
-    final btcPriceFrom = widget.btcPrices[from] ?? 0.0;
-    final btcPriceTo = widget.btcPrices[to] ?? 0.0;
-    if (btcPriceFrom == 0 || btcPriceTo == 0) return amount;
-    double amountInBTC = amount / btcPriceFrom;
-    return amountInBTC * btcPriceTo;
+    return convertViaBtc(amount, from, to, widget.btcPrices);
   }
 
   double _getAveragePurchasePrice(List<Purchase> purchases) {

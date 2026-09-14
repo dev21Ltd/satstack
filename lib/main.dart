@@ -1,128 +1,65 @@
-// main.dart - COMPLETE FIXED VERSION WITH BOTH LOGIN AND AUTO-LOCK
 import 'dart:async';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:provider/provider.dart';
-import 'package:path_provider/path_provider.dart';
-import 'dart:io';
 import 'models.dart';
 import 'home_screen.dart';
 import 'app_state.dart';
 import 'security_service.dart';
 import 'widgets.dart';
 import 'services.dart';
+import 'app_keys.dart';
+import 'hive_boxes.dart';
+import 'pin_crypto.dart';
 
-final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+Future<void> _registerAdapters() async {
+  if (!Hive.isAdapterRegistered(0)) {
+    Hive.registerAdapter(PurchaseAdapter());
+  }
+  if (!Hive.isAdapterRegistered(1)) {
+    Hive.registerAdapter(SaleAdapter());
+  }
+}
+
+Future<void> initializeHiveBase() async {
+  await Hive.initFlutter();
+  await _registerAdapters();
+}
+
+Future<void> openPortfolioBoxes() async {
+  final encryptionKey = SecurityService().requireSessionKey();
+  await HiveBoxes.openPurchases(encryptionKey);
+  await HiveBoxes.openSales(encryptionKey);
+  await HiveBoxes.openPreferences(encryptionKey);
+
+  try {
+    await StorageService().migrateSalesToNewFormat();
+  } catch (e) {
+    print('Sales format migration check failed: $e');
+  }
+
+  try {
+    await SecurityService().setMigrationCompleted();
+  } catch (e) {
+    print('Error setting migration completed flag: $e');
+  }
+}
+
+Future<void> lockPortfolioBoxes() async {
+  SecurityService().lockSession();
+  await Hive.close();
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   try {
-    print('Initializing Hive...');
-    await Hive.initFlutter();
-
-    // Register adapters
-    Hive.registerAdapter(PurchaseAdapter());
-    Hive.registerAdapter(SaleAdapter());
-
-    final securityService = SecurityService();
-    final encryptionKey = await securityService.getEncryptionKey();
-
-    print('Starting migration process...');
-    await _migrateToEncryptedStorage(securityService, encryptionKey);
-
-    // Open boxes with encryption
-    print('Opening Hive boxes...');
-    await Hive.openBox('btc_purchases', encryptionKey: encryptionKey);
-    await Hive.openBox('btc_sales', encryptionKey: encryptionKey);
-    await Hive.openBox('preferences');
-
-    print('Hive initialization completed successfully');
-
+    await initializeHiveBase();
     runApp(const MyApp());
   } catch (e) {
     print('Error during initialization: $e');
-    // Fallback: try to initialize without migration
-    try {
-      await Hive.initFlutter();
-      Hive.registerAdapter(PurchaseAdapter());
-      Hive.registerAdapter(SaleAdapter());
-
-      await Hive.openBox('btc_purchases');
-      await Hive.openBox('btc_sales');
-      await Hive.openBox('preferences');
-
-      runApp(const MyApp());
-    } catch (fallbackError) {
-      print('Fallback initialization also failed: $fallbackError');
-      runApp(const ErrorApp());
-    }
-  }
-}
-
-Future<void> _migrateToEncryptedStorage(SecurityService securityService, Uint8List encryptionKey) async {
-  final migrationCompleted = await securityService.isMigrationCompleted();
-
-  if (!migrationCompleted) {
-    print('Starting full migration process...');
-    try {
-      // Step 1: Migrate from unencrypted to encrypted storage
-      final oldPurchasesBox = await Hive.openBox('btc_purchases');
-      final oldSalesBox = await Hive.openBox('btc_sales');
-
-      final newPurchasesBox = await Hive.openBox('btc_purchases', encryptionKey: encryptionKey);
-      final newSalesBox = await Hive.openBox('btc_sales', encryptionKey: encryptionKey);
-
-      // Migrate purchases if needed
-      if (oldPurchasesBox.isNotEmpty && newPurchasesBox.isEmpty) {
-        final purchases = oldPurchasesBox.get('purchases', defaultValue: []);
-        if (purchases.isNotEmpty) {
-          await newPurchasesBox.put('purchases', purchases);
-          print('Migrated ${purchases.length} purchases to encrypted storage');
-        }
-      }
-
-      // Migrate sales if needed
-      if (oldSalesBox.isNotEmpty && newSalesBox.isEmpty) {
-        final sales = oldSalesBox.get('sales', defaultValue: []);
-        if (sales.isNotEmpty) {
-          await newSalesBox.put('sales', sales);
-          print('Migrated ${sales.length} sales to encrypted storage');
-        }
-      }
-
-      // Close old boxes
-      await oldPurchasesBox.close();
-      await oldSalesBox.close();
-
-      print('Encryption migration completed successfully');
-
-    } catch (e) {
-      print('Error during encryption migration: $e');
-      // Continue with sales format migration even if encryption migration fails
-    }
-  } else {
-    print('Encryption migration already completed');
-  }
-
-  // Step 2: Always run sales format migration (even if encryption migration was already done)
-  try {
-    print('Checking sales format migration...');
-    final storageService = StorageService();
-    await storageService.migrateSalesToNewFormat();
-    print('Sales format migration check completed');
-  } catch (e) {
-    print('Sales format migration check failed: $e');
-    // Don't throw here - we want the app to start even if migration fails
-  }
-
-  // Mark migration as completed
-  try {
-    await securityService.setMigrationCompleted();
-    print('Migration process marked as completed');
-  } catch (e) {
-    print('Error setting migration completed flag: $e');
+    runApp(const ErrorApp());
   }
 }
 
@@ -150,7 +87,7 @@ class MyApp extends StatelessWidget {
                 backgroundColor: bitcoinOrange,
               ),
               cardColor: const Color(0xFF1E1E1E),
-              textTheme: TextTheme(
+              textTheme: const TextTheme(
                 bodyLarge: TextStyle(fontSize: 16.0),
                 bodyMedium: TextStyle(fontSize: 14.0),
                 titleLarge: TextStyle(fontSize: 18.0, fontWeight: FontWeight.bold),
@@ -168,7 +105,7 @@ class MyApp extends StatelessWidget {
                 backgroundColor: bitcoinOrange,
               ),
               cardColor: Colors.grey[200],
-              textTheme: TextTheme(
+              textTheme: const TextTheme(
                 bodyLarge: TextStyle(fontSize: 16.0),
                 bodyMedium: TextStyle(fontSize: 14.0),
                 titleLarge: TextStyle(fontSize: 18.0, fontWeight: FontWeight.bold),
@@ -178,15 +115,6 @@ class MyApp extends StatelessWidget {
             ),
             home: const AppStartupScreen(),
             debugShowCheckedModeBanner: false,
-            builder: (context, child) {
-              final mediaQuery = MediaQuery.of(context);
-              return MediaQuery(
-                data: mediaQuery.copyWith(
-                  textScaleFactor: mediaQuery.textScaleFactor.clamp(0.8, 1.2).toDouble(),
-                ),
-                child: child!,
-              );
-            },
           );
         },
       ),
@@ -205,9 +133,9 @@ class AppStartupScreen extends StatefulWidget {
 class _AppStartupScreenState extends State<AppStartupScreen> with SingleTickerProviderStateMixin {
   final SecurityService _securityService = SecurityService();
   String _securityType = SecurityService.noSecurity;
-  bool _isLoading = true;
   bool _isAppReady = false;
   bool _showLoadingScreen = true;
+  bool _storageFailed = false;
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
   late Animation<double> _scaleAnimation;
@@ -245,60 +173,77 @@ class _AppStartupScreenState extends State<AppStartupScreen> with SingleTickerPr
       ),
     );
 
-    // Start animation immediately
     _animationController.forward();
-
-    // Start app initialization
     _initializeApp();
+  }
 
-    // Add a safety timer in case something goes wrong
-    Timer(const Duration(seconds: 10), () {
-      if (mounted && _showLoadingScreen) {
-        print('Safety timer triggered - forcing app transition');
-        setState(() {
-          _isLoading = false;
-          _isAppReady = true;
-          _showLoadingScreen = false;
-        });
+  Future<void> _revealApp() async {
+    if (!mounted || !_showLoadingScreen) return;
+    if (!_storageFailed && _securityType == SecurityService.noSecurity) {
+      try {
+        await _securityService.unlockUnpinned();
+        await openPortfolioBoxes();
+        if (!mounted) return;
+        await Provider.of<AppState>(context, listen: false).bootstrap();
+      } catch (e) {
+        print('Error opening unpinned storage: $e');
+        _storageFailed = true;
       }
+    }
+    if (!mounted) return;
+    setState(() {
+      _isAppReady = true;
+      _showLoadingScreen = false;
     });
   }
 
   void _initializeApp() async {
     try {
-      // Check security type first
       _securityType = await _securityService.getSecurityType();
       print('Security type detected: $_securityType');
-
-      // Always show loading screen for at least 5 seconds for good UX
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          // Start a timer to ensure minimum loading time
-          _loadingTimer = Timer(const Duration(milliseconds: 5000), () {
-            if (mounted) {
-              setState(() {
-                _isLoading = false;
-                _isAppReady = true;
-                _showLoadingScreen = false;
-              });
-            }
-          });
-        }
-      });
     } catch (e) {
       print('Error during app initialization: $e');
-      if (mounted) {
-        // Still show minimum loading time even on error
-        Timer(const Duration(milliseconds: 5000), () {
-          if (mounted) {
-            setState(() {
-              _isLoading = false;
-              _isAppReady = true;
-              _showLoadingScreen = false;
-            });
-          }
-        });
-      }
+      _storageFailed = true;
+    }
+
+    if (!mounted) return;
+    _loadingTimer?.cancel();
+    _loadingTimer = Timer(const Duration(milliseconds: 5000), _revealApp);
+  }
+
+  Future<void> _completePinUnlock() async {
+    await openPortfolioBoxes();
+    if (!mounted) return;
+    await Provider.of<AppState>(context, listen: false).bootstrap();
+  }
+
+  Future<void> _retrySecureStorage() async {
+    setState(() {
+      _storageFailed = false;
+      _showLoadingScreen = true;
+      _isAppReady = false;
+    });
+    _initializeApp();
+  }
+
+  Future<void> _wipeAndRestart() async {
+    try {
+      await Hive.close();
+      await HiveBoxes.resetAll();
+      await _securityService.wipeAll();
+      await initializeHiveBase();
+      await _securityService.unlockUnpinned();
+      await openPortfolioBoxes();
+      if (!mounted) return;
+      await Provider.of<AppState>(context, listen: false).bootstrap();
+      setState(() {
+        _storageFailed = false;
+        _securityType = SecurityService.noSecurity;
+        _isAppReady = true;
+        _showLoadingScreen = false;
+      });
+    } catch (e) {
+      print('Wipe failed: $e');
     }
   }
 
@@ -318,12 +263,20 @@ class _AppStartupScreenState extends State<AppStartupScreen> with SingleTickerPr
 
     // If app is ready, show the main app with proper security flow
     if (_isAppReady) {
+      if (_storageFailed) {
+        return SecureStorageErrorScreen(
+          onRetry: _retrySecureStorage,
+          onWipe: _wipeAndRestart,
+        );
+      }
       return Consumer<AppState>(
         builder: (context, appState, child) {
           // Show login screen only if security is enabled
           if (_securityType != SecurityService.noSecurity) {
             return LoginScreen(
               isDarkMode: appState.isDarkMode,
+              onUnlocked: _completePinUnlock,
+              onWipeStorage: _wipeAndRestart,
               child: AutoLockWrapper(
                 isDarkMode: appState.isDarkMode,
                 child: const HomeScreen(),
@@ -570,18 +523,14 @@ class _AppStartupScreenState extends State<AppStartupScreen> with SingleTickerPr
 
   Widget _buildLoadingText() {
     String text;
-    if (_progressAnimation.value < 0.2) {
-      text = 'INITIALIZING APP...';
-    } else if (_progressAnimation.value < 0.4) {
-      text = 'LOADING SECURE STORAGE...';
-    } else if (_progressAnimation.value < 0.6) {
-      text = 'LOADING PORTFOLIO DATA...';
-    } else if (_progressAnimation.value < 0.8) {
-      text = 'CONNECTING TO BLOCKCHAIN...';
-    } else if (_progressAnimation.value < 0.9) {
-      text = 'READY TO STACK SATS...';
+    if (_progressAnimation.value < 0.35) {
+      text = 'Starting SatStack';
+    } else if (_progressAnimation.value < 0.65) {
+      text = 'Checking lock settings';
+    } else if (_securityType == SecurityService.pinSecurity) {
+      text = 'PIN lock is on';
     } else {
-      text = _securityType == SecurityService.noSecurity ? 'LAUNCHING APP...' : 'PREPARING SECURITY...';
+      text = 'Opening your local portfolio';
     }
 
     return Text(
@@ -599,15 +548,12 @@ class _AppStartupScreenState extends State<AppStartupScreen> with SingleTickerPr
     String statusText;
     Color statusColor;
 
-    if (_securityType == SecurityService.noSecurity) {
-      statusText = 'APP IS UNLOCKED';
-      statusColor = Colors.green;
-    } else if (_securityType == SecurityService.pinSecurity) {
-      statusText = 'PIN SECURITY ENABLED';
+    if (_securityType == SecurityService.pinSecurity) {
+      statusText = 'PIN LOCK ENABLED';
       statusColor = Colors.orange;
     } else {
-      statusText = 'SECURED';
-      statusColor = const Color(0xFFF7931A);
+      statusText = 'NO PIN SET';
+      statusColor = Colors.green;
     }
 
     return AnimatedOpacity(
@@ -788,13 +734,13 @@ class _AutoLockWrapperState extends State<AutoLockWrapper> with WidgetsBindingOb
   bool _appInBackground = false;
   bool _showRecovery = false;
   bool _obscurePin = true;
+  bool _lockedOut = false;
+  String? _authError;
   final TextEditingController _recoveryAnswerController = TextEditingController();
   final TextEditingController _pinController = TextEditingController();
   Timer? _lockTimer;
+  Timer? _backgroundLockTimer;
   DateTime? _backgroundStartTime;
-
-  // NEW: Track if user has already authenticated in this session
-  bool _hasAuthenticated = false;
 
   @override
   void initState() {
@@ -806,6 +752,7 @@ class _AutoLockWrapperState extends State<AutoLockWrapper> with WidgetsBindingOb
   @override
   void dispose() {
     _lockTimer?.cancel();
+    _backgroundLockTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _recoveryAnswerController.dispose();
     _pinController.dispose();
@@ -813,12 +760,33 @@ class _AutoLockWrapperState extends State<AutoLockWrapper> with WidgetsBindingOb
   }
 
   Future<void> _loadSecuritySettings() async {
-    final type = await _securityService.getSecurityType();
+    try {
+      final type = await _securityService.getSecurityType();
+      if (!mounted) return;
+      setState(() {
+        _securityType = type;
+        _isLocked = false;
+        _obscurePin = true;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _securityType = SecurityService.pinSecurity;
+        _isLocked = true;
+        _obscurePin = true;
+      });
+    }
+  }
+
+  Future<void> _engageLock() async {
+    if (_isLocked) return;
+    try {
+      Provider.of<AppState>(context, listen: false).dropSessionData();
+    } catch (_) {}
+    await lockPortfolioBoxes();
+    if (!mounted) return;
     setState(() {
-      _securityType = type;
-      // IMPORTANT: Only lock if app is coming from background AND user hasn't already authenticated
-      // This prevents locking immediately when app starts
-      _isLocked = false; // Start unlocked
+      _isLocked = true;
       _obscurePin = true;
     });
   }
@@ -828,10 +796,7 @@ class _AutoLockWrapperState extends State<AutoLockWrapper> with WidgetsBindingOb
     // Start a timer for 2 minutes of inactivity in foreground
     _lockTimer = Timer(const Duration(minutes: 2), () {
       if (_securityType != SecurityService.noSecurity && !_isLocked) {
-        setState(() {
-          _isLocked = true;
-          _obscurePin = true;
-        });
+        _engageLock();
         print('Auto-lock activated after 2 minutes of inactivity');
       }
     });
@@ -860,13 +825,11 @@ class _AutoLockWrapperState extends State<AutoLockWrapper> with WidgetsBindingOb
           setState(() {
             _appInBackground = true;
           });
-          // Start background countdown - lock after 2 minutes in background
-          Timer(const Duration(minutes: 2), () {
+          _backgroundLockTimer?.cancel();
+          _backgroundLockTimer = Timer(const Duration(minutes: 2), () {
+            if (!mounted) return;
             if (_appInBackground && _securityType != SecurityService.noSecurity && !_isLocked) {
-              setState(() {
-                _isLocked = true;
-                _obscurePin = true;
-              });
+              _engageLock();
               print('Auto-lock activated after 2 minutes in background');
             }
           });
@@ -874,6 +837,7 @@ class _AutoLockWrapperState extends State<AutoLockWrapper> with WidgetsBindingOb
         break;
 
       case AppLifecycleState.resumed:
+        _backgroundLockTimer?.cancel();
         if (_appInBackground) {
           setState(() {
             _appInBackground = false;
@@ -883,10 +847,7 @@ class _AutoLockWrapperState extends State<AutoLockWrapper> with WidgetsBindingOb
           if (_backgroundStartTime != null) {
             final backgroundDuration = DateTime.now().difference(_backgroundStartTime!);
             if (backgroundDuration.inMinutes >= 2 && _securityType != SecurityService.noSecurity && !_isLocked) {
-              setState(() {
-                _isLocked = true;
-                _obscurePin = true;
-              });
+              _engageLock();
               print('Auto-lock activated after returning from background (${backgroundDuration.inMinutes}m)');
             } else if (!_isLocked) {
               // If not locked, start the foreground timer
@@ -910,7 +871,6 @@ class _AutoLockWrapperState extends State<AutoLockWrapper> with WidgetsBindingOb
       _isLocked = false;
       _obscurePin = true;
       _pinController.clear();
-      _hasAuthenticated = true; // Mark as authenticated
     });
     // Start the lock timer after unlocking
     if (_securityType != SecurityService.noSecurity) {
@@ -919,8 +879,7 @@ class _AutoLockWrapperState extends State<AutoLockWrapper> with WidgetsBindingOb
   }
 
   Future<void> _resetSecurity() async {
-    final question = await _securityService.getBackupQuestion();
-    if (question == null) {
+    if (!await _securityService.hasBackupQuestion()) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('No recovery question set'),
         backgroundColor: Colors.orange,
@@ -928,7 +887,13 @@ class _AutoLockWrapperState extends State<AutoLockWrapper> with WidgetsBindingOb
       return;
     }
 
-    if (_recoveryAnswerController.text.toLowerCase() == question['answer']) {
+    final result = await _securityService.verifyBackupAnswer(_recoveryAnswerController.text);
+    if (result.success) {
+      try {
+        await openPortfolioBoxes();
+        if (!mounted) return;
+        await Provider.of<AppState>(context, listen: false).bootstrap();
+      } catch (_) {}
       await _securityService.clearSecurityData();
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('Security reset successfully'),
@@ -939,13 +904,19 @@ class _AutoLockWrapperState extends State<AutoLockWrapper> with WidgetsBindingOb
         _securityType = SecurityService.noSecurity;
         _isLocked = false;
         _obscurePin = true;
+        _lockedOut = false;
+        _authError = null;
         _pinController.clear();
         _recoveryAnswerController.clear();
       });
       _stopLockTimer();
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Incorrect answer'),
+      setState(() {
+        _lockedOut = result.lockedOut;
+        _authError = result.message;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(result.message),
         backgroundColor: Colors.red,
       ));
     }
@@ -1084,12 +1055,18 @@ class _AutoLockWrapperState extends State<AutoLockWrapper> with WidgetsBindingOb
               controller: _pinController,
               obscureText: _obscurePin,
               keyboardType: TextInputType.number,
-              maxLength: 4,
+              maxLength: pinMaxLength,
               textAlign: TextAlign.center,
               textAlignVertical: TextAlignVertical.center,
-              enableInteractiveSelection: true,
+              enableInteractiveSelection: false,
               enableSuggestions: false,
               autocorrect: false,
+              enabled: !_lockedOut,
+              contextMenuBuilder: (context, state) => const SizedBox.shrink(),
+              inputFormatters: [
+                FilteringTextInputFormatter.digitsOnly,
+                LengthLimitingTextInputFormatter(pinMaxLength),
+              ],
               style: TextStyle(
                 fontSize: 24,
                 color: textColor,
@@ -1127,13 +1104,22 @@ class _AutoLockWrapperState extends State<AutoLockWrapper> with WidgetsBindingOb
             ),
           ),
 
+          if (_authError != null) ...[
+            const SizedBox(height: 12),
+            Text(
+              _authError!,
+              style: const TextStyle(color: Colors.redAccent, fontSize: 13),
+              textAlign: TextAlign.center,
+            ),
+          ],
+
           const SizedBox(height: 20),
 
           // Unlock button
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: () => _checkPin(_pinController.text),
+              onPressed: _lockedOut ? null : () => _checkPin(_pinController.text),
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFFF7931A),
                 foregroundColor: Colors.black,
@@ -1294,8 +1280,8 @@ class _AutoLockWrapperState extends State<AutoLockWrapper> with WidgetsBindingOb
 
                 const SizedBox(height: 20),
 
-                FutureBuilder<Map<String, String>?>(
-                  future: _securityService.getBackupQuestion(),
+                FutureBuilder<String?>(
+                  future: _securityService.getBackupQuestionText(),
                   builder: (context, snapshot) {
                     if (snapshot.connectionState == ConnectionState.waiting) {
                       return CircularProgressIndicator(color: const Color(0xFFF7931A));
@@ -1354,7 +1340,7 @@ class _AutoLockWrapperState extends State<AutoLockWrapper> with WidgetsBindingOb
                       );
                     }
 
-                    final question = snapshot.data!;
+                    final question = snapshot.data ?? '';
                     return Container(
                       width: 280,
                       padding: const EdgeInsets.all(20),
@@ -1383,7 +1369,7 @@ class _AutoLockWrapperState extends State<AutoLockWrapper> with WidgetsBindingOb
                           const SizedBox(height: 16),
 
                           Text(
-                            question['question']!,
+                            question,
                             style: TextStyle(
                               fontSize: 16,
                               color: textColor,
@@ -1396,6 +1382,11 @@ class _AutoLockWrapperState extends State<AutoLockWrapper> with WidgetsBindingOb
 
                           TextField(
                             controller: _recoveryAnswerController,
+                            obscureText: true,
+                            enableInteractiveSelection: false,
+                            enableSuggestions: false,
+                            autocorrect: false,
+                            contextMenuBuilder: (context, state) => const SizedBox.shrink(),
                             decoration: InputDecoration(
                               labelText: 'Your answer',
                               border: const OutlineInputBorder(),
@@ -1451,13 +1442,31 @@ class _AutoLockWrapperState extends State<AutoLockWrapper> with WidgetsBindingOb
   }
 
   Future<void> _checkPin(String enteredPin) async {
-    final storedPin = await _securityService.getPinCode();
-    if (enteredPin == storedPin) {
+    final result = await _securityService.verifyPin(enteredPin);
+    if (result.success) {
+      try {
+        await openPortfolioBoxes();
+        if (!mounted) return;
+        await Provider.of<AppState>(context, listen: false).bootstrap();
+      } catch (e) {
+        if (!mounted) return;
+        setState(() => _authError = 'Could not open encrypted storage');
+        return;
+      }
+      setState(() {
+        _authError = null;
+        _lockedOut = false;
+      });
       _unlockApp();
     } else {
+      setState(() {
+        _lockedOut = result.lockedOut;
+        _authError = result.message;
+      });
+      _pinController.clear();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('Invalid PIN'),
+          content: Text(result.message),
           backgroundColor: Colors.red,
           duration: const Duration(seconds: 2),
         ),
@@ -1507,8 +1516,13 @@ class ErrorApp extends StatelessWidget {
                 ),
                 SizedBox(height: 24),
                 ElevatedButton(
-                  onPressed: () {
-                    runApp(const MyApp());
+                  onPressed: () async {
+                    try {
+                      await initializeHiveBase();
+                      runApp(const MyApp());
+                    } catch (e) {
+                      print('Retry initialization failed: $e');
+                    }
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.red,
@@ -1540,12 +1554,9 @@ class ErrorApp extends StatelessWidget {
 
   Future<void> _clearAppDataAndRestart() async {
     try {
-      await Hive.close();
-      final appDir = await getApplicationDocumentsDirectory();
-      final hiveDir = Directory('${appDir.path}/hive');
-      if (await hiveDir.exists()) {
-        await hiveDir.delete(recursive: true);
-      }
+      await HiveBoxes.resetAll();
+      await SecurityService().wipeAll();
+      await initializeHiveBase();
       runApp(const MyApp());
     } catch (e) {
       print('Error clearing app data: $e');

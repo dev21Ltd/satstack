@@ -24,12 +24,16 @@ class Purchase {
   double get totalCashSpent => amountBTC * pricePerBTC;
 
   factory Purchase.fromMap(Map<String, dynamic> map) {
+    final amount = _asDouble(map['amountBTC']);
+    final price = map['pricePerBTC'] != null
+        ? _asDouble(map['pricePerBTC'])
+        : (amount == 0 ? 0.0 : _asDouble(map['totalCashSpent']) / amount);
     return Purchase(
-      id: map['id'],
-      date: DateTime.parse(map['date']),
-      amountBTC: map['amountBTC'],
-      pricePerBTC: map['pricePerBTC'] ?? map['totalCashSpent'] / map['amountBTC'],
-      cashCurrency: Currency.values[map['cashCurrency']],
+      id: map['id']?.toString(),
+      date: DateTime.parse(map['date'].toString()),
+      amountBTC: amount,
+      pricePerBTC: price,
+      cashCurrency: Currency.values[_asIndex(map['cashCurrency'], Currency.values.length)],
     );
   }
 
@@ -71,16 +75,7 @@ class Sale {
 
   // Helper method to get price in any currency
   double getPriceInCurrency(Currency currency, Map<Currency, double> btcPrices) {
-    if (originalCurrency == currency) return price;
-
-    final btcPriceOriginal = btcPrices[originalCurrency] ?? 0.0;
-    final btcPriceTarget = btcPrices[currency] ?? 0.0;
-
-    if (btcPriceOriginal == 0 || btcPriceTarget == 0) return price;
-
-    // Convert via BTC: price (original) -> BTC -> price (target)
-    double btcAmount = price / btcPriceOriginal;
-    return btcAmount * btcPriceTarget;
+    return convertViaBtc(price, originalCurrency, currency, btcPrices);
   }
 
   // Updated fromMap method with migration support
@@ -89,20 +84,20 @@ class Sale {
     if (map['originalCurrency'] == null) {
       // This is an old sale record - migrate it
       return Sale(
-        id: map['id'],
-        date: DateTime.parse(map['date']),
-        amountBTC: map['amountBTC'],
-        price: map['priceUSD'] ?? 0.0,
+        id: map['id']?.toString(),
+        date: DateTime.parse(map['date'].toString()),
+        amountBTC: _asDouble(map['amountBTC']),
+        price: _asDouble(map['priceUSD']),
         originalCurrency: Currency.USD, // Default to USD for migration
       );
     }
 
     return Sale(
-      id: map['id'],
-      date: DateTime.parse(map['date']),
-      amountBTC: map['amountBTC'],
-      price: map['price'],
-      originalCurrency: Currency.values[map['originalCurrency']],
+      id: map['id']?.toString(),
+      date: DateTime.parse(map['date'].toString()),
+      amountBTC: _asDouble(map['amountBTC']),
+      price: _asDouble(map['price']),
+      originalCurrency: Currency.values[_asIndex(map['originalCurrency'], Currency.values.length)],
     );
   }
 
@@ -117,4 +112,16 @@ class Sale {
   }
 
   String formatUKDate() => DateFormat('dd/MM/yyyy').format(date);
+}
+
+double _asDouble(dynamic value, [double fallback = 0]) {
+  if (value is num) return value.toDouble();
+  if (value is String) return double.tryParse(value) ?? fallback;
+  return fallback;
+}
+
+int _asIndex(dynamic value, int length, [int fallback = 0]) {
+  final index = value is num ? value.toInt() : fallback;
+  if (index < 0 || index >= length) return fallback;
+  return index;
 }

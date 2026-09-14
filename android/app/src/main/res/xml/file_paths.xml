@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
-    <external-path name="external_files" path="."/>
-    <external-downloads-path name="downloads" path="SatStack/"/>
-    <external-files-path name="external_files" path="SatStack/"/>
-    <cache-path name="cache" path="SatStack/"/>
+    <!-- Only app-owned locations. Do not expose shared external storage. -->
+    <files-path name="app_files" path="."/>
+    <cache-path name="cache" path="."/>
+    <external-files-path name="external_app_files" path="SatStack/"/>
+    <external-cache-path name="external_cache" path="."/>
 </paths>

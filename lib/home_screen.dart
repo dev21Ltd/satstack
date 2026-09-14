@@ -149,33 +149,27 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     }
   }
 
-  void _showSuccessAnimation(String message) {
-    _successAnimationController.reset(); _successAnimationController.forward();
-    _showAnimationDialog(SuccessAnimationOverlay(
-      message: message, animationController: _successAnimationController, isDarkMode: Provider.of<AppState>(context, listen: false).isDarkMode,
-    ));
+  void _showSuccessAnimation(String message) => _showDoneSnack(message);
+
+  void _showSaveAnimation(String message) => _showDoneSnack(message);
+
+  void _showImportAnimation(String message) => _showDoneSnack(message);
+
+  void _showDoneSnack(String message) {
+    _showMessengerSnack(message, Colors.green);
   }
 
-  void _showSaveAnimation(String message) {
-    _saveAnimationController.reset(); _saveAnimationController.forward();
-    _showAnimationDialog(SaveAnimationOverlay(
-      message: message, animationController: _saveAnimationController, isDarkMode: Provider.of<AppState>(context, listen: false).isDarkMode,
-    ));
-  }
-
-  void _showImportAnimation(String message) {
-    _importAnimationController.reset(); _importAnimationController.forward();
-    _showAnimationDialog(ImportAnimationOverlay(
-      message: message, animationController: _importAnimationController, isDarkMode: Provider.of<AppState>(context, listen: false).isDarkMode,
-    ));
-  }
-
-  void _showAnimationDialog(Widget dialog) {
-    showDialog(context: context, barrierColor: Colors.transparent, barrierDismissible: false, builder: (context) => dialog);
-    Future.delayed(3500.ms, () {
-      if (Navigator.of(context, rootNavigator: true).canPop()) {
-        Navigator.of(context, rootNavigator: true).pop();
-      }
+  void _showMessengerSnack(String message, Color color) {
+    if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final messenger = ScaffoldMessenger.maybeOf(this.context);
+      if (messenger == null) return;
+      messenger.showSnackBar(SnackBar(
+        content: Text(message),
+        backgroundColor: color,
+        duration: const Duration(seconds: 3),
+      ));
     });
   }
 
@@ -185,6 +179,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
       await storageService.exportData(format: 'pdf', shareAfterSave: false);
       await Future.delayed(100.ms);
       if (mounted) _showSuccessAnimation('PDF Report Saved!');
+    } on SaveCancelledException {
+      return;
     } catch (e) {
       await Future.delayed(100.ms);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Save failed: ${e.toString()}'), backgroundColor: Colors.red));
@@ -197,6 +193,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
       await storageService.exportData(format: 'csv', shareAfterSave: false);
       await Future.delayed(100.ms);
       if (mounted) _showSuccessAnimation('CSV Report Saved!');
+    } on SaveCancelledException {
+      return;
     } catch (e) {
       await Future.delayed(100.ms);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Save failed: ${e.toString()}'), backgroundColor: Colors.red));
@@ -209,9 +207,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
       await storageService.exportData(format: 'json', shareAfterSave: false);
       await Future.delayed(100.ms);
       if (mounted) _showSuccessAnimation('JSON Backup Saved!');
+    } on SaveCancelledException {
+      return;
     } catch (e) {
       await Future.delayed(100.ms);
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Save failed: ${e.toString()}'), backgroundColor: Colors.red));
+      if (mounted) ScaffoldMessenger.of(this.context).showSnackBar(SnackBar(content: Text('Save failed: ${e.toString()}'), backgroundColor: Colors.red));
     }
   }
 
@@ -219,49 +219,53 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     try {
       final storageService = StorageService();
       await storageService.exportData(format: format, shareAfterSave: true);
+    } on SaveCancelledException {
+      return;
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Share failed: ${e.toString()}'), backgroundColor: Colors.red));
+      if (mounted) ScaffoldMessenger.of(this.context).showSnackBar(SnackBar(content: Text('Share failed: ${e.toString()}'), backgroundColor: Colors.red));
     }
   }
 
   void _importFromFile(BuildContext context, String format) async {
     try {
-      final appState = Provider.of<AppState>(context, listen: false);
+      final appState = Provider.of<AppState>(this.context, listen: false);
       final storageService = StorageService();
       print('Starting import with format: $format');
       await storageService.importData(format: format);
       print('Import completed, reloading app state...');
       await appState.reloadAllData();
       print('App state reloaded');
-      _showImportAnimation('${format.toUpperCase()} Imported Successfully!');
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Successfully imported ${appState.purchases.length} purchases and ${appState.sales.length} sales'),
-        backgroundColor: Colors.green, duration: Duration(seconds: 4),
-      ));
+      if (!mounted) return;
+      _showDoneSnack(
+        'Imported ${appState.purchases.length} purchases and ${appState.sales.length} sales',
+      );
+    } on ImportCancelledException {
+      return;
     } catch (e) {
       print('Import error: $e');
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Import failed: ${e.toString()}'), backgroundColor: Colors.red, duration: Duration(seconds: 5),
-      ));
+      if (!mounted) return;
+      _showMessengerSnack('Import failed: $e', Colors.red);
     }
   }
 
   void _showJsonImportDialog(BuildContext context) {
     final controller = TextEditingController();
-    showDialog(context: context, builder: (context) => AlertDialog(
+    showDialog(context: this.context, builder: (dialogContext) => AlertDialog(
       title: const Text('Paste JSON Data'),
       content: TextField(controller: controller, maxLines: 10, decoration: const InputDecoration(hintText: 'Paste exported JSON data here', border: OutlineInputBorder())),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
         ElevatedButton(onPressed: () async {
           try {
-            final appState = Provider.of<AppState>(context, listen: false);
+            final appState = Provider.of<AppState>(this.context, listen: false);
             final storageService = StorageService();
             await storageService.importDataFromJsonString(controller.text);
             await appState.reloadAllData();
-            Navigator.pop(context);
-            _showImportAnimation('JSON Imported Successfully!');
-          } catch (e) { ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Import failed: ${e.toString()}'))); }
+            Navigator.pop(dialogContext);
+            if (mounted) _showDoneSnack('JSON Imported Successfully!');
+          } catch (e) {
+            if (mounted) _showMessengerSnack('Import failed: $e', Colors.red);
+          }
         }, child: const Text('Import')),
       ],
     ));
@@ -338,16 +342,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
 
   // Helper method to convert currency using BTC as intermediary
   double _convertCurrency(double amount, Currency from, Currency to, Map<Currency, double> btcPrices) {
-    if (from == to) return amount;
-
-    final btcPriceFrom = btcPrices[from] ?? 0.0;
-    final btcPriceTo = btcPrices[to] ?? 0.0;
-
-    if (btcPriceFrom == 0 || btcPriceTo == 0) return amount;
-
-    // Convert: amount (in 'from' currency) -> BTC -> amount (in 'to' currency)
-    double amountInBTC = amount / btcPriceFrom;
-    return amountInBTC * btcPriceTo;
+    return convertViaBtc(amount, from, to, btcPrices);
   }
 
   @override Widget build(BuildContext context) {
@@ -364,22 +359,39 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     }
     return Scaffold(
       appBar: AppBar(
-        title: _buildAppBarTitle(appState, isSmallScreen), centerTitle: true,
+        title: _buildAppBarTitle(appState, isSmallScreen),
+        centerTitle: screenWidth >= 600,
+        titleSpacing: 12,
         actions: [
-          IconButton(icon: Icon(Icons.favorite, color: const Color(0xFFF7931A)), onPressed: () => DonationWidget.showDonationDialog(context, appState.isDarkMode), tooltip: 'Support Development'),
-          IconButton(icon: Icon(appState.holdingsHidden ? Icons.visibility_off : Icons.visibility), onPressed: () => appState.toggleHoldingsVisibility(), tooltip: appState.holdingsHidden ? 'Show Holdings' : 'Hide Holdings'),
-          IconButton(icon: const Icon(Icons.import_export), onPressed: _showImportExportDialog),
-          // MODIFIED: Added privacy and terms menu items
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.favorite, color: Color(0xFFF7931A)),
+            onPressed: () => DonationWidget.showDonationDialog(context, appState.isDarkMode),
+            tooltip: 'Support Development',
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            icon: Icon(appState.holdingsHidden ? Icons.visibility_off : Icons.visibility),
+            onPressed: () => appState.toggleHoldingsVisibility(),
+            tooltip: appState.holdingsHidden ? 'Show Holdings' : 'Hide Holdings',
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.import_export),
+            onPressed: _showImportExportDialog,
+            tooltip: 'Import / Export',
+          ),
           PopupMenuButton<String>(
-            icon: const Icon(Icons.settings),
+            icon: const Icon(Icons.more_vert),
             onSelected: (value) async {
               if (value == 'currency') _showCurrencySettings(appState);
               if (value == 'security') _showSecuritySettings(appState);
+              if (value == 'theme') appState.toggleTheme(!appState.isDarkMode);
               if (value == 'privacy') {
                 final Uri url = Uri.parse('https://github.com/dev21Ltd/satstack/blob/master/PRIVACY.md');
                 if (await canLaunchUrl(url)) {
                   await launchUrl(url, mode: LaunchMode.externalApplication);
-                } else {
+                } else if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('Could not open link')),
                   );
@@ -389,7 +401,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
                 final Uri url = Uri.parse('https://github.com/dev21Ltd/satstack/blob/master/TERMS.md');
                 if (await canLaunchUrl(url)) {
                   await launchUrl(url, mode: LaunchMode.externalApplication);
-                } else {
+                } else if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('Could not open link')),
                   );
@@ -399,11 +411,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
             itemBuilder: (BuildContext context) => [
               const PopupMenuItem<String>(value: 'currency', child: Text('Currency Settings')),
               const PopupMenuItem<String>(value: 'security', child: Text('Security Settings')),
+              PopupMenuItem<String>(value: 'theme', child: Text(appState.isDarkMode ? 'Light Mode' : 'Dark Mode')),
               const PopupMenuItem<String>(value: 'privacy', child: Text('Privacy Policy')),
               const PopupMenuItem<String>(value: 'terms', child: Text('Terms of Service')),
             ],
           ),
-          IconButton(icon: Icon(appState.isDarkMode ? Icons.light_mode : Icons.dark_mode), onPressed: () => appState.toggleTheme(!appState.isDarkMode)),
         ],
       ),
       body: Padding(padding: EdgeInsets.only(bottom: bottomPadding), child: Column(children: [
@@ -421,10 +433,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   }
 
   Widget _buildAppBarTitle(AppState appState, bool isSmallScreen) {
-    return Container(width: double.infinity, child: Row(mainAxisAlignment: MainAxisAlignment.center, mainAxisSize: MainAxisSize.min, children: [
-      FaIcon(FontAwesomeIcons.bitcoin, color: const Color(0xFFF7931A), size: isSmallScreen ? 20 : 22),
-      SizedBox(width: isSmallScreen ? 6 : 8), Text('SatStack', style: TextStyle(fontSize: isSmallScreen ? 16 : 18, color: appState.isDarkMode ? Colors.white : Colors.black)),
-    ]));
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: isSmallScreen ? Alignment.centerLeft : Alignment.center,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FaIcon(FontAwesomeIcons.bitcoin, color: const Color(0xFFF7931A), size: isSmallScreen ? 20 : 22),
+          SizedBox(width: isSmallScreen ? 6 : 8),
+          Text('SatStack', style: TextStyle(fontSize: isSmallScreen ? 16 : 18, color: appState.isDarkMode ? Colors.white : Colors.black)),
+        ],
+      ),
+    );
   }
 
   Widget _buildOverviewTab(AppState appState) {
@@ -436,7 +456,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
             prices: appState.btcPrices, onCurrencyChanged: (currency) => appState.setSelectedCurrency(currency), onSettingsPressed: () => _showCurrencySettings(appState),
             isRefreshing: appState.isRefreshing, isDarkMode: appState.isDarkMode),
         const SizedBox(height: 16),
-        PortfolioChart(key: ValueKey('portfolio_chart_${appState.selectedCurrency}_${appState.purchases.length}_${appState.holdingsHidden}'),
+        PortfolioChart(
             purchases: appState.purchases,
             sales: appState.sales,
             isDarkMode: appState.isDarkMode, currentBtcPrice: appState.getBtcPrice(appState.selectedCurrency), currency: appState.selectedCurrency, portfolioValue: appState.portfolioValue,
@@ -444,8 +464,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
             onDeletePurchase: (purchaseToDelete) => appState.deletePurchase(purchaseToDelete.id),
             onEditSale: (updatedSale) => appState.updateSale(updatedSale),
             onDeleteSale: (saleToDelete) => appState.deleteSale(saleToDelete.id),
-            denomination: appState.denomination, btcPrices: appState.btcPrices, holdingsHidden: appState.holdingsHidden),
-      ]))).animate(delay: 100.ms).slideX(duration: 300.ms, curve: Curves.easeOut, begin: _currentTabIndex == 0 ? -0.1 : 0.1).fadeIn(),
+            denomination: appState.denomination, btcPrices: appState.btcPrices, holdingsHidden: appState.holdingsHidden,
+            pricesOnDate: appState.pricesOnDate),
+      ]))),
     );
   }
 
@@ -460,7 +481,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
         const SizedBox(height: 16), Text('Portfolio Overview', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: appState.isDarkMode ? Colors.white : Colors.black)),
         const SizedBox(height: 16), _buildPortfolioGrid(appState), const SizedBox(height: 16), _buildPortfolioDetails(appState),
         const SizedBox(height: 16), _buildPortfolioAllocationChart(appState), const SizedBox(height: 16), _buildPerformanceMetrics(appState),
-      ]))).animate(delay: 100.ms).slideX(duration: 300.ms, curve: Curves.easeOut, begin: _currentTabIndex == 1 ? -0.1 : 0.1).fadeIn(),
+      ]))),
     );
   }
 
@@ -652,6 +673,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
                               fontWeight: FontWeight.w500,
                               color: appState.isDarkMode ? Colors.white70 : Colors.black54,
                             ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                           const SizedBox(height: 4),
                           TextField(
@@ -698,21 +721,27 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
                             ),
                           ),
                           const SizedBox(height: 4),
-                          ElevatedButton.icon(
-                            onPressed: () => _pickDate(appState),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFFF7931A), // Bitcoin orange
-                              foregroundColor: Colors.black,
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(6),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              onPressed: () => _pickDate(appState),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFFF7931A), // Bitcoin orange
+                                foregroundColor: Colors.black,
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                elevation: 2,
                               ),
-                              elevation: 2,
-                            ),
-                            icon: Icon(Icons.calendar_today, size: 16),
-                            label: Text(
-                              _formatUKDate(appState.selectedDate),
-                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                              icon: const Icon(Icons.calendar_today, size: 16),
+                              label: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  _formatUKDate(appState.selectedDate),
+                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                                ),
+                              ),
                             ),
                           ),
                         ],
@@ -721,29 +750,34 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
 
                     const SizedBox(width: 12),
 
-                    SizedBox(
-                      width: 140,
+                    Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const SizedBox(height: 4),
-                          ElevatedButton.icon(
-                            onPressed: () => _addTransaction(appState), // now async
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: _isPurchaseMode ? Colors.green : Colors.red,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(6),
+                          const SizedBox(height: 16),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              onPressed: () => _addTransaction(appState), // now async
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: _isPurchaseMode ? Colors.green : Colors.red,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
                               ),
-                            ),
-                            icon: Icon(
-                              _isPurchaseMode ? Icons.add_shopping_cart : Icons.remove_shopping_cart,
-                              size: 18,
-                            ),
-                            label: Text(
-                              _isPurchaseMode ? 'Add Purchase' : 'Add Sale',
-                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                              icon: Icon(
+                                _isPurchaseMode ? Icons.add_shopping_cart : Icons.remove_shopping_cart,
+                                size: 18,
+                              ),
+                              label: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  _isPurchaseMode ? 'Add Purchase' : 'Add Sale',
+                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                                ),
+                              ),
                             ),
                           ),
                         ],
@@ -810,74 +844,84 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
                 ],
               ),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Column(
-                    children: [
-                      Text(
-                        'Total Purchases',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: appState.isDarkMode ? Colors.white70 : Colors.black54,
+                  Expanded(
+                    child: Column(
+                      children: [
+                        Text(
+                          'Total Purchases',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: appState.isDarkMode ? Colors.white70 : Colors.black54,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                      ),
-                      Text(
-                        appState.purchases.length.toString(),
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: appState.isDarkMode ? Colors.white : Colors.black,
+                        Text(
+                          appState.purchases.length.toString(),
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: appState.isDarkMode ? Colors.white : Colors.black,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                   Container(
                     height: 30,
                     width: 1,
                     color: appState.isDarkMode ? Colors.grey[700] : Colors.grey[300],
                   ),
-                  Column(
-                    children: [
-                      Text(
-                        'Total BTC',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: appState.isDarkMode ? Colors.white70 : Colors.black54,
+                  Expanded(
+                    child: Column(
+                      children: [
+                        Text(
+                          'Total BTC',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: appState.isDarkMode ? Colors.white70 : Colors.black54,
+                          ),
                         ),
-                      ),
-                      Text(
-                        appState.holdingsHidden ? '****' : appState.formatBtcAmount(appState.totalCrypto),
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: appState.isDarkMode ? Colors.white : Colors.black,
+                        FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            appState.holdingsHidden ? '****' : appState.formatBtcAmount(appState.totalBTC),
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: appState.isDarkMode ? Colors.white : Colors.black,
+                            ),
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                   Container(
                     height: 30,
                     width: 1,
                     color: appState.isDarkMode ? Colors.grey[700] : Colors.grey[300],
                   ),
-                  Column(
-                    children: [
-                      Text(
-                        'Total Sales',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: appState.isDarkMode ? Colors.white70 : Colors.black54,
+                  Expanded(
+                    child: Column(
+                      children: [
+                        Text(
+                          'Total Sales',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: appState.isDarkMode ? Colors.white70 : Colors.black54,
+                          ),
                         ),
-                      ),
-                      Text(
-                        appState.sales.length.toString(),
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.purple,
+                        Text(
+                          appState.sales.length.toString(),
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.purple,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -885,7 +929,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
           ],
         ],
       ),
-    ).animate(delay: 100.ms).slideX(duration: 300.ms, curve: Curves.easeOut, begin: _currentTabIndex == 1 ? -0.1 : 0.1).fadeIn();
+    );
   }
 
   Widget _buildLastUpdated(AppState appState) {
@@ -907,7 +951,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     final isSmallScreen = screenWidth < 400;
     if (screenWidth < 600) return GridView.count(crossAxisCount: 2, childAspectRatio: isSmallScreen ? 1.1 : 1.2, shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
         padding: EdgeInsets.all(isSmallScreen ? 8 : 12), mainAxisSpacing: isSmallScreen ? 8 : 12, crossAxisSpacing: isSmallScreen ? 8 : 12, children: [
-          _buildPortfolioCard(context: context, title: 'BTC Holdings', value: appState.formatBtcAmount(appState.totalCrypto), subtitle: 'Total Bitcoin', icon: Icons.account_balance_wallet,
+          _buildPortfolioCard(context: context, title: 'BTC Holdings', value: appState.formatBtcAmount(appState.totalBTC), subtitle: 'Total Bitcoin', icon: Icons.account_balance_wallet,
               isDarkMode: appState.isDarkMode, valueColor: const Color(0xFFF7931A), appState: appState),
           _buildPortfolioCard(context: context, title: 'Total Investment', value: appState.totalInvestment == 0 ? '-' : appState.formatSensitiveValue(appState.totalInvestment, currency: currencyToString(appState.selectedCurrency)),
               subtitle: 'Total Cash Spent', icon: Icons.attach_money, isDarkMode: appState.isDarkMode, valueColor: appState.isDarkMode ? Colors.white : Colors.black, appState: appState),
@@ -918,7 +962,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
               valueColor: appState.profitLoss >= 0 ? Colors.green : Colors.red, appState: appState),
         ]);
     else return SizedBox(height: 140, child: ListView(scrollDirection: Axis.horizontal, children: [
-      SizedBox(width: isSmallScreen ? 8 : 16), _buildPortfolioCard(context: context, title: 'BTC Holdings', value: appState.formatBtcAmount(appState.totalCrypto), subtitle: 'Total Bitcoin', icon: Icons.account_balance_wallet,
+      SizedBox(width: isSmallScreen ? 8 : 16), _buildPortfolioCard(context: context, title: 'BTC Holdings', value: appState.formatBtcAmount(appState.totalBTC), subtitle: 'Total Bitcoin', icon: Icons.account_balance_wallet,
           isDarkMode: appState.isDarkMode, valueColor: const Color(0xFFF7931A), appState: appState),
       SizedBox(width: isSmallScreen ? 8 : 12), _buildPortfolioCard(context: context, title: 'Total Investment', value: appState.totalInvestment == 0 ? '-' : appState.formatSensitiveValue(appState.totalInvestment, currency: currencyToString(appState.selectedCurrency)),
           subtitle: 'Total Cash Spent', icon: Icons.attach_money, isDarkMode: appState.isDarkMode, valueColor: appState.isDarkMode ? Colors.white : Colors.black, appState: appState),
@@ -951,8 +995,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     return Container(width: double.infinity, decoration: BoxDecoration(color: appState.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white, borderRadius: BorderRadius.circular(12),
         boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 10, offset: const Offset(0, 4))]), padding: const EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [Icon(Icons.analytics, color: const Color(0xFFF7931A), size: 20), const SizedBox(width: 8),
-          Text('Portfolio Details', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: appState.isDarkMode ? Colors.white : Colors.black))]),
+        Row(children: [const Icon(Icons.analytics, color: Color(0xFFF7931A), size: 20), const SizedBox(width: 8),
+          Expanded(child: Text('Portfolio Details', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: appState.isDarkMode ? Colors.white : Colors.black), overflow: TextOverflow.ellipsis))]),
         const SizedBox(height: 16),
         _buildPortfolioDetailRow('Total Investment', appState.totalInvestment == 0 ? '-' : appState.formatSensitiveValue(appState.totalInvestment, currency: currencyToString(appState.selectedCurrency)), appState.isDarkMode),
         _buildPortfolioDetailRow('Current Value', appState.portfolioValue == 0 ? '-' : appState.formatSensitiveValue(appState.portfolioValue, currency: currencyToString(appState.selectedCurrency)), appState.isDarkMode),
@@ -967,9 +1011,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   Widget _buildPortfolioDetailRow(String label, String value, bool isDarkMode, {Color? valueColor}) {
     final defaultColor = isDarkMode ? Colors.white : Colors.black;
     return Container(padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12), decoration: BoxDecoration(border: Border(bottom: BorderSide(color: isDarkMode ? Colors.grey[800]! : Colors.grey[200]!, width: 1))),
-      child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-        Text(label, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: isDarkMode ? Colors.white70 : Colors.black54)),
-        Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: valueColor ?? defaultColor)),
+      child: Row(children: [
+        Expanded(child: Text(label, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: isDarkMode ? Colors.white70 : Colors.black54), overflow: TextOverflow.ellipsis)),
+        const SizedBox(width: 8),
+        Flexible(child: Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: valueColor ?? defaultColor), overflow: TextOverflow.ellipsis, textAlign: TextAlign.end)),
       ]),
     );
   }
@@ -1041,14 +1086,17 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
         children: [
           Row(
             children: [
-              Icon(Icons.pie_chart, color: const Color(0xFFF7931A), size: 20),
+              const Icon(Icons.pie_chart, color: Color(0xFFF7931A), size: 20),
               const SizedBox(width: 8),
-              Text(
-                'Portfolio Allocation by Year',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: appState.isDarkMode ? Colors.white : Colors.black,
+              Expanded(
+                child: Text(
+                  'Portfolio Allocation by Year',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: appState.isDarkMode ? Colors.white : Colors.black,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],
@@ -1074,7 +1122,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
                           PieChart(
                             PieChartData(
                               sections: allocationData.map((data) => PieChartSectionData(
-                                value: data.investment,
+                                value: data.investment > 0 ? data.investment : 0.0001,
                                 color: data.color,
                                 title: '',
                                 radius: 20,
@@ -1234,7 +1282,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
                           PieChart(
                             PieChartData(
                               sections: allocationData.map((data) => PieChartSectionData(
-                                value: data.investment,
+                                value: data.investment > 0 ? data.investment : 0.0001,
                                 color: data.color,
                                 title: '',
                                 radius: 18,
@@ -1282,7 +1330,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
                       crossAxisCount: 2,
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
-                      childAspectRatio: 3,
+                      childAspectRatio: 2.2,
                       mainAxisSpacing: 8,
                       crossAxisSpacing: 8,
                       children: allocationData.map((data) {
@@ -1383,8 +1431,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     return Container(width: double.infinity, decoration: BoxDecoration(color: appState.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white, borderRadius: BorderRadius.circular(12),
         boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 10, offset: const Offset(0, 4))]), padding: const EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [Icon(Icons.leaderboard, color: const Color(0xFFF7931A), size: 20), const SizedBox(width: 8),
-          Text('Performance Metrics', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: appState.isDarkMode ? Colors.white : Colors.black))]),
+        Row(children: [const Icon(Icons.leaderboard, color: Color(0xFFF7931A), size: 20), const SizedBox(width: 8),
+          Expanded(child: Text('Performance Metrics', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: appState.isDarkMode ? Colors.white : Colors.black), overflow: TextOverflow.ellipsis))]),
         const SizedBox(height: 16),
         _buildMetricRow('ROI', appState.formatSensitivePercentage(appState.profitLossPercentage), appState.profitLossPercentage >= 0, appState.isDarkMode),
         _buildMetricRow('Total Return', appState.formatSensitiveValue(appState.profitLoss, currency: currencyToString(appState.selectedCurrency)), appState.profitLoss >= 0, appState.isDarkMode),
@@ -1397,9 +1445,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
 
   Widget _buildMetricRow(String label, String value, bool isPositive, bool isDarkMode) {
     return Container(padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12), decoration: BoxDecoration(border: Border(bottom: BorderSide(color: isDarkMode ? Colors.grey[800]! : Colors.grey[200]!, width: 1))),
-      child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-        Text(label, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: isDarkMode ? Colors.white54 : Colors.black54)),
-        Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: isPositive ? (isDarkMode ? Colors.green[300] : Colors.green[700]) : (isDarkMode ? Colors.red[300] : Colors.red[700]))),
+      child: Row(children: [
+        Expanded(child: Text(label, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: isDarkMode ? Colors.white54 : Colors.black54), overflow: TextOverflow.ellipsis)),
+        const SizedBox(width: 8),
+        Flexible(child: Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: isPositive ? (isDarkMode ? Colors.green[300] : Colors.green[700]) : (isDarkMode ? Colors.red[300] : Colors.red[700])), overflow: TextOverflow.ellipsis, textAlign: TextAlign.end)),
       ]),
     );
   }
