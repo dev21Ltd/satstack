@@ -26,14 +26,15 @@ Full notes: [CHANGELOG.md](CHANGELOG.md)
 
 ## 📱 Download
 
-- [Google Play](#) (Coming soon)
-- [App Store](#) (Coming soon)
-- [Direct APK](#) (Check Releases)
+- **Google Play:** listing in progress (not live yet)
+- **GitHub Releases:** https://github.com/dev21Ltd/satstack/releases
+- **Source:** clone this repo and run with Flutter
+- iOS / App Store is not maintained in this tree
 
 ## 🚀 Getting Started
 
 ### For Users
-Download from your preferred app store and start tracking your Bitcoin portfolio privately.
+Android is the supported app. A Play Store listing is in progress. Until it is live, clone the repo or watch [Releases](https://github.com/dev21Ltd/satstack/releases).
 
 ### For Developers
 ```bash
@@ -51,21 +52,21 @@ flutter run
 ## 🏗️ Project Structure
 ```
 satstack/
-├── lib/
-│   ├── main.dart           # App entry point
-│   ├── home_screen.dart    # Main dashboard
-│   ├── app_state.dart      # State management
-│   ├── models.dart         # Data models
-│   ├── services.dart       # Storage & API
-│   ├── security_service.dart # Encryption
-│   ├── widgets.dart        # UI components
-│   ├── charts.dart         # Charts
-│   ├── purchase_calendar.dart
-│   └── import_export_widget.dart
-├── android/                # Android config
-├── ios/                   # iOS config
-├── pubspec.yaml           # Dependencies
-└── README.md              # This file
+├── lib/                    # App source
+│   ├── main.dart
+│   ├── home_screen.dart
+│   ├── security_service.dart
+│   ├── pin_crypto.dart
+│   ├── hive_boxes.dart
+│   ├── charts.dart
+│   └── ...
+├── android/                # Android (supported)
+├── test/                   # Unit and widget tests
+├── store/                  # Play Store "what's new" copy
+├── CHANGELOG.md
+├── PRIVACY.md
+├── TERMS.md
+└── CONTRIBUTING.md
 ```
 
 
@@ -94,7 +95,7 @@ JSON/CSV/PDF exports are plaintext files.
 ✅ Open source for auditability
 
 ## 🤝 Contributing
-Contributions are welcome! Please read our Contributing Guidelines first.
+Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) first.
 
 ## 📄 License
 This project is licensed under the MIT License - see the LICENSE file for details.
@@ -105,7 +106,10 @@ The SatStack name and logo are trademarks.
 
 ## 🔗 Links
 - [GitHub Repository](https://github.com/dev21Ltd/satstack)
+- [Changelog](CHANGELOG.md)
 - [Privacy Policy](PRIVACY.md)
+- [Terms of Service](TERMS.md)
+- [Contributing](CONTRIBUTING.md)
 - [Issue Tracker](https://github.com/dev21Ltd/satstack/issues)
 
 ## ⚠️ Disclaimer
