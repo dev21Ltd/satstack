@@ -33,6 +33,7 @@ class SecurityService {
   static const String _wrappedPinKey = 'hive_key_wrapped_pin';
   static const String _wrappedRecoveryKey = 'hive_key_wrapped_recovery';
   static const String _migrationCompletedKey = 'migration_completed';
+  static const String _jsonBackupPasswordKey = 'json_backup_password';
 
   Uint8List? _sessionKey;
 
@@ -91,6 +92,25 @@ class SecurityService {
     final key = await _ensureSessionKey();
     await _storeWrapped(_wrappedRecoveryKey, key, normalized);
     await _storage.delete(key: _encryptionKey);
+  }
+
+  Future<String?> getJsonBackupPassword() async {
+    final value = await _storage.read(key: _jsonBackupPasswordKey);
+    if (value == null || value.isEmpty) return null;
+    return value;
+  }
+
+  Future<bool> hasJsonBackupPassword() async {
+    return await getJsonBackupPassword() != null;
+  }
+
+  Future<void> setJsonBackupPassword(String password) async {
+    if (!PinCrypto.isValidBackupPassword(password)) {
+      throw ArgumentError(
+        'JSON backup password must be at least $backupMinPasswordLength characters',
+      );
+    }
+    await _storage.write(key: _jsonBackupPasswordKey, value: password);
   }
 
   Future<String?> getBackupQuestionText() async {

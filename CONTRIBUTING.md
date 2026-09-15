@@ -21,4 +21,4 @@ flutter test
 5. Open a pull request against `master` and describe what changed and how you tested it.
 
 ## Security and privacy
-Exported JSON, CSV, and PDF files are plaintext. Do not add copy that says otherwise. A PIN wraps local Hive storage; it is not full-phone encryption.
+JSON backups are encrypted with the password stored in Security Settings (not the app PIN). CSV and PDF exports are plaintext. A PIN wraps local Hive storage; it is not full-phone encryption.

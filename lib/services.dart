@@ -21,6 +21,7 @@ import 'app_keys.dart';
 import 'hive_boxes.dart';
 import 'platform/local_fs.dart';
 import 'platform/pinned_http.dart';
+import 'pin_crypto.dart';
 
 class RateLimitException implements Exception {
   @override String toString() => 'Rate limit exceeded';
@@ -41,6 +42,13 @@ class ApiException implements Exception {
   final int statusCode;
   ApiException(this.message, this.statusCode);
   @override String toString() => 'API error: $message (Status code: $statusCode)';
+}
+
+class EncryptedBackupRequired implements Exception {
+  EncryptedBackupRequired(this.json);
+  final String json;
+  @override
+  String toString() => 'This backup is encrypted. Enter the backup password.';
 }
 
 class ImportCancelledException implements Exception {
@@ -385,7 +393,7 @@ class StorageService {
     await box.put('denomination', denomination.index);
   }
 
-  Future<void> exportData({String format = 'csv', bool shareAfterSave = false}) async {
+  Future<void> exportData({String format = 'csv', bool shareAfterSave = false, String? backupPassword}) async {
     try {
       final purchases = await loadPurchases();
       final sales = await loadSales();
@@ -395,7 +403,7 @@ class StorageService {
       } else if (format == 'pdf') {
         await _exportToPdf(purchases, sales, shareAfterSave);
       } else if (format == 'json') {
-        await _exportToJson(purchases, sales, preferencesBox, shareAfterSave);
+        await _exportToJson(purchases, sales, preferencesBox, shareAfterSave, backupPassword);
       }
     } on SaveCancelledException {
       rethrow;
@@ -575,7 +583,10 @@ class StorageService {
     return grid;
   }
 
-  Future<void> _exportToJson(List<Purchase> purchases, List<Sale> sales, Box preferencesBox, bool shareAfterSave) async {
+  Future<void> _exportToJson(List<Purchase> purchases, List<Sale> sales, Box preferencesBox, bool shareAfterSave, String? backupPassword) async {
+    if (backupPassword == null || !PinCrypto.isValidBackupPassword(backupPassword)) {
+      throw ArgumentError('JSON backups need a password of at least $backupMinPasswordLength characters');
+    }
     final jsonData = {
       'version': 3,
       'exportDate': DateTime.now().toIso8601String(),
@@ -588,7 +599,8 @@ class StorageService {
         'denomination': (preferencesBox.get('denomination', defaultValue: 0) as num).toInt(),
       }
     };
-    final jsonString = jsonEncode(jsonData);
+    final envelope = PinCrypto.encryptBackup(jsonEncode(jsonData), backupPassword);
+    final jsonString = jsonEncode(envelope);
     final fileName = 'satstack_export_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.json';
     final bytes = utf8.encode(jsonString);
 
@@ -880,6 +892,8 @@ class StorageService {
       }
     } on ImportCancelledException {
       rethrow;
+    } on EncryptedBackupRequired {
+      rethrow;
     } catch (e) {
       print('Import error: $e');
       throw Exception('Failed to import data: ${e.toString()}');
@@ -910,9 +924,15 @@ class StorageService {
     return firstLine.contains(',') || firstLine.contains(';') || firstLine.contains('\t');
   }
 
-  Future<void> importDataFromJsonString(String jsonString) async {
+  Future<void> importDataFromJsonString(String jsonString, {String? backupPassword}) async {
     try {
-      final decoded = jsonDecode(jsonString);
+      dynamic decoded = jsonDecode(jsonString);
+      if (PinCrypto.isEncryptedBackup(decoded)) {
+        if (backupPassword == null || backupPassword.isEmpty) {
+          throw EncryptedBackupRequired(jsonString);
+        }
+        decoded = jsonDecode(PinCrypto.decryptBackup(Map<String, dynamic>.from(decoded), backupPassword));
+      }
       if (decoded is! Map) {
         throw Exception('Invalid backup format');
       }
@@ -936,6 +956,8 @@ class StorageService {
         await box.put('denomination', preferences['denomination'] ?? 0);
         print('Imported preferences from JSON');
       }
+    } on EncryptedBackupRequired {
+      rethrow;
     } catch (e) {
       throw Exception('Invalid JSON format: $e');
     }

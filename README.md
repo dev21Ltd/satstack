@@ -4,12 +4,17 @@
 
 SatStack is an open source, privacy-focused Bitcoin portfolio tracker. All data stays on your device - no accounts, no tracking, no cloud storage.
 
+## What's new in 1.0.3
+
+- JSON backups use the password in Security Settings (not the app PIN). After reinstall, enter that password, then import JSON. CSV/PDF stay plaintext.
+- Chart: original trade marks, 1M–10Y + Max ranges.
+- App PIN and JSON password are separate in Security Settings.
+
 ## What's new in 1.0.2
 
 - Stronger on-device security: hashed PIN, lockout, Hive boxes stay closed until unlock, Android backup off, screenshots blocked.
 - Clearer portfolio chart (calendar dates, clusters, 3-year range) and trade-date currency conversion when history is available.
-- JSON, CSV, and PDF exports are plaintext. The app warns that anyone with the file can read your trades.
-- JSON backup is a simple file again (save / import, no extra password).
+- JSON backups are encrypted with the password saved in Security Settings (not the app PIN). CSV and PDF stay plaintext.
 
 Full notes: [CHANGELOG.md](CHANGELOG.md)
 
@@ -21,7 +26,7 @@ Full notes: [CHANGELOG.md](CHANGELOG.md)
 - 📈 **Real-time Prices**: Live Bitcoin price updates
 - 🔐 **Security**: PIN wraps the Hive AES key; boxes stay closed until unlock
 - 📱 **Platforms**: Android is the supported mobile target in this tree. Web compiles. iOS is not maintained here.
-- 📤 **Export**: CSV, PDF, JSON exports
+- 📤 **Export**: Encrypted JSON backups; plaintext CSV/PDF reports
 - 🎨 **Themes**: Dark/Light mode
 
 ## 📱 Download
@@ -90,7 +95,7 @@ satstack/
 
 ✅ Auto-lock closes encrypted boxes
 
-JSON/CSV/PDF exports are plaintext files.
+JSON backups are password-encrypted. CSV and PDF exports are plaintext.
 
 ✅ Open source for auditability
 

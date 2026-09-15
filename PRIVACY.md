@@ -1,6 +1,6 @@
 # Privacy Policy for SatStack
 
-**Last Updated:** September 14, 2026
+**Last Updated:** September 15, 2026
 
 ## Our Promise
 SatStack collects **ZERO** personal data. Your portfolio stays on your device.
@@ -21,7 +21,10 @@ SatStack collects **ZERO** personal data. Your portfolio stays on your device.
 - Optional PIN is a lock **and** wraps the disk key. It is not a substitute for full-disk encryption of the phone.
 
 ## Exports
-- JSON, CSV, and PDF exports are **plaintext**. Anyone with those files can read your trades. Treat them like financial documents.
+- JSON backups are **encrypted** with a password you save in Security Settings (kept in the device keystore). That password is **not** the app PIN.
+- Anyone who has the JSON file **and** that password can restore your trades. Without the password the file is not readable.
+- Uninstalling the app deletes the stored JSON password. After reinstall, enter the same password in Security Settings, then import the file. If you forget it, those JSON backups cannot be recovered.
+- CSV and PDF reports are **plaintext**. Anyone with those files can read your trades. Treat them like financial documents.
 
 ## External Services
 CoinGecko HTTPS is used only for Bitcoin prices. No portfolio data is sent. Android connections to `api.coingecko.com` check the TLS certificate (leaf pin plus Google Trust Services WE1 issuer).

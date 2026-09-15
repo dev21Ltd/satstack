@@ -1,6 +1,6 @@
 # Terms of Service for SatStack
 
-**Last Updated:** February 19, 2026
+**Last Updated:** September 15, 2026
 
 ## Acceptance of Terms
 By using SatStack ("the App"), you agree to be bound by these Terms of Service. If you do not agree, do not use the App.
@@ -10,6 +10,15 @@ SatStack is a portfolio tracking tool only. It does not provide financial advice
 
 ## User Responsibility
 You are solely responsible for your Bitcoin holdings, private keys, and any transactions you record in the App. The App does not hold or manage any real cryptocurrency – it is only a tracking tool.
+
+## Local Data and Backups
+SatStack stores your portfolio on your device. There is no cloud account. Uninstalling the App deletes local app data.
+
+You are responsible for backups. To restore the App after reinstall, import a **JSON** backup. Enter the same JSON password in Security Settings (not the app PIN), then import that file. If you forget the password, those JSON files cannot be recovered.
+
+CSV and PDF are not encrypted app restores. They are plaintext reports/spreadsheets. Anyone with those files can read your trades. PDF cannot be imported back into the App.
+
+An optional app PIN locks the App on this device. It does not encrypt exported files and is not a substitute for locking or encrypting the phone.
 
 ## Data Accuracy
 We strive to provide accurate price data via CoinGecko API, but we do not guarantee its accuracy, completeness, or timeliness. Prices may be delayed or incorrect. Use at your own risk.

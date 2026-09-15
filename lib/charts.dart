@@ -8,13 +8,22 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:flutter_animate/flutter_animate.dart';
 
-enum PortfolioTimeRange { MONTH_1, MONTH_6, YEAR_1, YEAR_3, MAX }
+enum PortfolioTimeRange {
+  MONTH_1,
+  MONTH_6,
+  YEAR_1,
+  YEAR_2,
+  YEAR_3,
+  YEAR_4,
+  YEAR_5,
+  YEAR_10,
+  MAX,
+}
 
 /// Chart X/Y axis style.
-/// `true`  = calendar ticks, nice Y numbers, upright labels.
-/// `false` = previous index-interval axes with rotated dates.
-/// Set this to `false` to restore the previous chart axes.
-const bool kUseNiceChartAxes = true;
+/// `true`  = calendar ticks, clusters, activity strip.
+/// `false` = original axes: rotated trade dates and a purchase/sale dot on each trade day.
+const bool kUseNiceChartAxes = false;
 
 class PortfolioChart extends StatefulWidget {
   final List<Purchase> purchases;
@@ -236,28 +245,21 @@ class _PortfolioChartState extends State<PortfolioChart>
 
   DateTime _calculateStartDate(DateTime firstPurchaseDate, DateTime now) {
     DateTime startDate;
-    switch (_selectedTimeRange) {
-      case PortfolioTimeRange.MONTH_1:
-        startDate = _getStartDate(
-            firstPurchaseDate, DateTime(now.year, now.month - 1, now.day));
-        break;
-      case PortfolioTimeRange.MONTH_6:
-        startDate = _getStartDate(
-            firstPurchaseDate, DateTime(now.year, now.month - 6, now.day));
-        break;
-      case PortfolioTimeRange.YEAR_1:
-        startDate = _getStartDate(
-            firstPurchaseDate, DateTime(now.year - 1, now.month, now.day));
-        break;
-      case PortfolioTimeRange.YEAR_3:
-        startDate = _getStartDate(
-            firstPurchaseDate, DateTime(now.year - 3, now.month, now.day));
-        break;
-      case PortfolioTimeRange.MAX:
-        startDate = firstPurchaseDate;
-        if (startDate.isBefore(DateTime(2009, 1, 3)))
-          startDate = DateTime(2009, 1, 3);
-        break;
+    final years = _yearsBack(_selectedTimeRange);
+    if (_selectedTimeRange == PortfolioTimeRange.MONTH_1) {
+      startDate = _getStartDate(
+          firstPurchaseDate, DateTime(now.year, now.month - 1, now.day));
+    } else if (_selectedTimeRange == PortfolioTimeRange.MONTH_6) {
+      startDate = _getStartDate(
+          firstPurchaseDate, DateTime(now.year, now.month - 6, now.day));
+    } else if (years != null) {
+      startDate = _getStartDate(
+          firstPurchaseDate, DateTime(now.year - years, now.month, now.day));
+    } else {
+      startDate = firstPurchaseDate;
+      if (startDate.isBefore(DateTime(2009, 1, 3))) {
+        startDate = DateTime(2009, 1, 3);
+      }
     }
     return startDate.isAfter(now) ? now : startDate;
   }
@@ -302,8 +304,7 @@ class _PortfolioChartState extends State<PortfolioChart>
 
     allDates = allDates.toSet().toList()..sort();
 
-    if (_selectedTimeRange == PortfolioTimeRange.MAX &&
-        allDates.length > 100) {
+    if (_shouldSampleLongRange && allDates.length > 100) {
       List<DateTime> sampledDates = [];
       final step = (allDates.length / 50).ceil();
       for (int i = 0; i < allDates.length; i += step)
@@ -498,20 +499,18 @@ class _PortfolioChartState extends State<PortfolioChart>
       return;
     }
 
-    final valueRange = _maxValue - _minValue;
+    // Floor the axis at the real line start (can be negative). Pad only the top
+    // so the first $ label sits on the line instead of below it.
+    final dataMin = _minValue;
+    final dataMax = _maxValue;
+    final valueRange = dataMax - dataMin;
+    _minValue = dataMin;
     if (valueRange > 0) {
-      _minValue -= valueRange * 0.05;
-      _maxValue += valueRange * 0.05;
-    } else if (_maxValue > 0) {
-      _minValue *= 0.95;
-      _maxValue *= 1.05;
-    }
-
-    if (_maxValue - _minValue < _maxValue * 0.1) {
-      final mid = (_maxValue + _minValue) / 2;
-      final range = _maxValue * 0.1;
-      _minValue = mid - range / 2;
-      _maxValue = mid + range / 2;
+      _maxValue = dataMax + valueRange * 0.08;
+    } else {
+      final pad = math.max(dataMax.abs() * 0.1, 1.0);
+      _minValue = dataMin - pad;
+      _maxValue = dataMax + pad;
     }
     _yInterval = _getPriceInterval(_minValue, _maxValue);
     _xTicks = [];
@@ -567,12 +566,15 @@ class _PortfolioChartState extends State<PortfolioChart>
   int _maxTimelineTicks() {
     switch (_selectedTimeRange) {
       case PortfolioTimeRange.MONTH_1:
-        return 6;
       case PortfolioTimeRange.MONTH_6:
         return 6;
       case PortfolioTimeRange.YEAR_1:
+      case PortfolioTimeRange.YEAR_2:
         return 8;
       case PortfolioTimeRange.YEAR_3:
+      case PortfolioTimeRange.YEAR_4:
+      case PortfolioTimeRange.YEAR_5:
+      case PortfolioTimeRange.YEAR_10:
       case PortfolioTimeRange.MAX:
         return 12;
     }
@@ -585,8 +587,12 @@ class _PortfolioChartState extends State<PortfolioChart>
         return '${monday.year}-${monday.month}-${monday.day}';
       case PortfolioTimeRange.MONTH_6:
       case PortfolioTimeRange.YEAR_1:
+      case PortfolioTimeRange.YEAR_2:
         return '${date.year}-${date.month}';
       case PortfolioTimeRange.YEAR_3:
+      case PortfolioTimeRange.YEAR_4:
+      case PortfolioTimeRange.YEAR_5:
+      case PortfolioTimeRange.YEAR_10:
       case PortfolioTimeRange.MAX:
         return '${date.year}';
     }
@@ -661,8 +667,12 @@ class _PortfolioChartState extends State<PortfolioChart>
         return 'w-${monday.year}-${monday.month}-${monday.day}';
       case PortfolioTimeRange.MONTH_6:
       case PortfolioTimeRange.YEAR_1:
+      case PortfolioTimeRange.YEAR_2:
         return 'm-${date.year}-${date.month}';
       case PortfolioTimeRange.YEAR_3:
+      case PortfolioTimeRange.YEAR_4:
+      case PortfolioTimeRange.YEAR_5:
+      case PortfolioTimeRange.YEAR_10:
       case PortfolioTimeRange.MAX:
         return _uniqueTradeDaysInView() > 40
             ? 'q-${date.year}-${((date.month - 1) ~/ 3) + 1}'
@@ -680,8 +690,12 @@ class _PortfolioChartState extends State<PortfolioChart>
         return 'Week of ${DateFormat('d MMM yyyy').format(monday)}';
       case PortfolioTimeRange.MONTH_6:
       case PortfolioTimeRange.YEAR_1:
+      case PortfolioTimeRange.YEAR_2:
         return DateFormat('MMMM yyyy').format(date);
       case PortfolioTimeRange.YEAR_3:
+      case PortfolioTimeRange.YEAR_4:
+      case PortfolioTimeRange.YEAR_5:
+      case PortfolioTimeRange.YEAR_10:
       case PortfolioTimeRange.MAX:
         return _uniqueTradeDaysInView() > 40
             ? 'Q${((date.month - 1) ~/ 3) + 1} ${date.year}'
@@ -811,6 +825,52 @@ class _PortfolioChartState extends State<PortfolioChart>
     super.dispose();
   }
 
+  int? _yearsBack(PortfolioTimeRange range) {
+    switch (range) {
+      case PortfolioTimeRange.YEAR_1:
+        return 1;
+      case PortfolioTimeRange.YEAR_2:
+        return 2;
+      case PortfolioTimeRange.YEAR_3:
+        return 3;
+      case PortfolioTimeRange.YEAR_4:
+        return 4;
+      case PortfolioTimeRange.YEAR_5:
+        return 5;
+      case PortfolioTimeRange.YEAR_10:
+        return 10;
+      case PortfolioTimeRange.MONTH_1:
+      case PortfolioTimeRange.MONTH_6:
+      case PortfolioTimeRange.MAX:
+        return null;
+    }
+  }
+
+  bool get _shouldSampleLongRange {
+    switch (_selectedTimeRange) {
+      case PortfolioTimeRange.YEAR_5:
+      case PortfolioTimeRange.YEAR_10:
+      case PortfolioTimeRange.MAX:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  bool get _useYearLabels {
+    switch (_selectedTimeRange) {
+      case PortfolioTimeRange.YEAR_2:
+      case PortfolioTimeRange.YEAR_3:
+      case PortfolioTimeRange.YEAR_4:
+      case PortfolioTimeRange.YEAR_5:
+      case PortfolioTimeRange.YEAR_10:
+      case PortfolioTimeRange.MAX:
+        return true;
+      default:
+        return false;
+    }
+  }
+
   String _getTimeRangeLabel(PortfolioTimeRange timeRange) {
     switch (timeRange) {
       case PortfolioTimeRange.MONTH_1:
@@ -819,8 +879,16 @@ class _PortfolioChartState extends State<PortfolioChart>
         return '6M';
       case PortfolioTimeRange.YEAR_1:
         return '1Y';
+      case PortfolioTimeRange.YEAR_2:
+        return '2Y';
       case PortfolioTimeRange.YEAR_3:
         return '3Y';
+      case PortfolioTimeRange.YEAR_4:
+        return '4Y';
+      case PortfolioTimeRange.YEAR_5:
+        return '5Y';
+      case PortfolioTimeRange.YEAR_10:
+        return '10Y';
       case PortfolioTimeRange.MAX:
         return 'Max';
     }
@@ -1654,13 +1722,30 @@ class _PortfolioChartState extends State<PortfolioChart>
   }
 
   Widget _buildTimeRangeSelector() {
-    return Row(
+    Widget row(List<PortfolioTimeRange> ranges) {
+      return Row(
+        children: [
+          for (final range in ranges) _buildTimeRangeButton(range),
+        ],
+      );
+    }
+
+    return Column(
       children: [
-        _buildTimeRangeButton(PortfolioTimeRange.MONTH_1),
-        _buildTimeRangeButton(PortfolioTimeRange.MONTH_6),
-        _buildTimeRangeButton(PortfolioTimeRange.YEAR_1),
-        _buildTimeRangeButton(PortfolioTimeRange.YEAR_3),
-        _buildTimeRangeButton(PortfolioTimeRange.MAX),
+        row(const [
+          PortfolioTimeRange.MONTH_1,
+          PortfolioTimeRange.MONTH_6,
+          PortfolioTimeRange.YEAR_1,
+          PortfolioTimeRange.YEAR_2,
+          PortfolioTimeRange.YEAR_3,
+        ]),
+        const SizedBox(height: 4),
+        row(const [
+          PortfolioTimeRange.YEAR_4,
+          PortfolioTimeRange.YEAR_5,
+          PortfolioTimeRange.YEAR_10,
+          PortfolioTimeRange.MAX,
+        ]),
       ],
     );
   }
@@ -1675,8 +1760,8 @@ class _PortfolioChartState extends State<PortfolioChart>
                 backgroundColor: isSelected
                     ? Color(0xFFF7931A)
                     : widget.isDarkMode ? Colors.grey[800] : Colors.grey[300],
-                padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 8),
-                minimumSize: const Size(0, 36),
+                padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 6),
+                minimumSize: const Size(0, 32),
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(6))),
@@ -1902,7 +1987,7 @@ class _PortfolioChartState extends State<PortfolioChart>
           sideTitles: SideTitles(
             showTitles: true,
             interval: kUseNiceChartAxes ? 1 : _getTimeInterval(),
-            reservedSize: kUseNiceChartAxes ? 28 : 22,
+            reservedSize: kUseNiceChartAxes ? 28 : 48,
             getTitlesWidget: (value, meta) {
               if (value < 0 || value >= _portfolioData.length) return const SizedBox();
               final index = value.round();
@@ -1923,10 +2008,11 @@ class _PortfolioChartState extends State<PortfolioChart>
                   ),
                 );
               }
-              return Transform.rotate(
-                angle: -0.4,
-                child: Padding(
-                  padding: EdgeInsets.only(top: 8.0),
+              return Padding(
+                padding: EdgeInsets.only(left: index == 0 ? 8 : 0, top: 16.0),
+                child: Transform.rotate(
+                  angle: -0.4,
+                  alignment: Alignment.topLeft,
                   child: Text(
                     label,
                     style: TextStyle(
@@ -1946,10 +2032,6 @@ class _PortfolioChartState extends State<PortfolioChart>
                 : _getPriceInterval(_minValue, _maxValue),
             reservedSize: kUseNiceChartAxes ? 44 : 55,
             getTitlesWidget: (value, meta) {
-              if (!kUseNiceChartAxes &&
-                  (value < _minValue || value > _maxValue)) {
-                return const SizedBox();
-              }
               if (kUseNiceChartAxes) {
                 if (!_yInterval.isFinite || _yInterval <= 0) {
                   return const SizedBox();
@@ -1959,9 +2041,40 @@ class _PortfolioChartState extends State<PortfolioChart>
                 if ((ticksFromMin - ticksFromMin.round()).abs() > 0.02) {
                   return const SizedBox();
                 }
+              } else {
+                if (value < _minValue || value > _maxValue) {
+                  return const SizedBox();
+                }
+                final yStep = _getPriceInterval(_minValue, _maxValue);
+                if (yStep > 0) {
+                  final distMin = (value - _minValue).abs();
+                  final distMax = (value - _maxValue).abs();
+                  final isMin = distMin <= yStep * 0.08;
+                  final isMax = distMax <= yStep * 0.08;
+                  final onGridZero =
+                      ((value / yStep) - (value / yStep).round()).abs() < 0.08;
+                  final fromMin = (value - _minValue) / yStep;
+                  final onGridMin = (fromMin - fromMin.round()).abs() < 0.08;
+                  final onGrid = onGridZero || onGridMin;
+                  if (!isMin && !isMax && !onGrid) {
+                    return const SizedBox();
+                  }
+                  // Only hide a grid tick when it would print on top of min/max.
+                  if (onGrid && !isMin && distMin < yStep * 0.18) {
+                    return const SizedBox();
+                  }
+                  if (onGrid && !isMax && distMax < yStep * 0.18) {
+                    return const SizedBox();
+                  }
+                }
               }
-              return Padding(
-                padding: EdgeInsets.only(right: 6.0),
+              return SideTitleWidget(
+                axisSide: meta.axisSide,
+                space: 6,
+                fitInside: SideTitleFitInsideData.fromTitleMeta(
+                  meta,
+                  distanceFromEdge: 0,
+                ),
                 child: Text(
                   _formatPriceForAxis(value, widget.currency),
                   style: TextStyle(
@@ -1977,6 +2090,19 @@ class _PortfolioChartState extends State<PortfolioChart>
             },
           ),
         ),
+      ),
+      extraLinesData: ExtraLinesData(
+        extraLinesOnTop: false,
+        horizontalLines: [
+          if (_minValue < 0 && _maxValue > 0)
+            HorizontalLine(
+              y: 0,
+              color: widget.isDarkMode
+                  ? Colors.white.withOpacity(0.35)
+                  : Colors.black.withOpacity(0.35),
+              strokeWidth: 1,
+            ),
+        ],
       ),
       borderData: FlBorderData(show: false),
       minX: 0,
@@ -2339,6 +2465,9 @@ class _PortfolioChartState extends State<PortfolioChart>
 
   String _formatChartDate(DateTime date) {
     final dataLength = _portfolioData.length;
+    if (_useYearLabels) {
+      return DateFormat('yyyy').format(date);
+    }
     if (kUseNiceChartAxes) {
       switch (_selectedTimeRange) {
         case PortfolioTimeRange.MONTH_1:
@@ -2346,8 +2475,7 @@ class _PortfolioChartState extends State<PortfolioChart>
         case PortfolioTimeRange.MONTH_6:
         case PortfolioTimeRange.YEAR_1:
           return DateFormat('MMM yy').format(date);
-        case PortfolioTimeRange.YEAR_3:
-        case PortfolioTimeRange.MAX:
+        default:
           return DateFormat('yyyy').format(date);
       }
     }
@@ -2360,9 +2488,7 @@ class _PortfolioChartState extends State<PortfolioChart>
         return dataLength > 20
             ? DateFormat('MMM yy').format(date)
             : DateFormat('MMM yyyy').format(date);
-      case PortfolioTimeRange.YEAR_3:
-        return DateFormat('yyyy').format(date);
-      case PortfolioTimeRange.MAX:
+      default:
         return DateFormat('yyyy').format(date);
     }
   }

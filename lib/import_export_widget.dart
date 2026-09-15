@@ -271,7 +271,7 @@ class _ImportExportDialogState extends State<ImportExportDialog> with SingleTick
         child: Row(children: [
           Icon(Icons.security, color: Colors.green, size: isSmallScreen ? 16 : 18),
           const SizedBox(width: 8),
-          Expanded(child: Text('JSON, CSV, and PDF exports are plaintext — anyone with the file can read your trades. Store copies on encrypted storage and treat them like financial documents.', style: TextStyle(color: widget.isDarkMode ? Colors.green[100] : Colors.green[800], fontSize: isSmallScreen ? 12 : 14, fontWeight: FontWeight.w500))),
+          Expanded(child: Text('JSON is encrypted with the Security Settings password (not the app PIN). After reinstall, enter that same password in Security, then import. CSV and PDF are plaintext.', style: TextStyle(color: widget.isDarkMode ? Colors.green[100] : Colors.green[800], fontSize: isSmallScreen ? 12 : 14, fontWeight: FontWeight.w500))),
         ]),
       ),
       const SizedBox(height: 16),
@@ -279,7 +279,7 @@ class _ImportExportDialogState extends State<ImportExportDialog> with SingleTick
       const SizedBox(height: 12),
       _buildFormatItem('PDF Report', 'Printable overview. Plaintext — anyone with the file can read it.', Icons.picture_as_pdf, Colors.red, isSmallScreen),
       const SizedBox(height: 8), _buildFormatItem('CSV Backup', 'Spreadsheet format for analysis. Plaintext — anyone with the file can read it.', Icons.table_chart, Colors.green, isSmallScreen),
-      const SizedBox(height: 8), _buildFormatItem('JSON Backup', 'Complete backup of trades and settings. Plaintext — anyone with the file can read it.', Icons.code, Colors.purple, isSmallScreen),
+      const SizedBox(height: 8), _buildFormatItem('JSON Backup', 'Restores the app. Encrypted with the JSON password in Security Settings (not the app PIN). After reinstall, enter that same password in Security, then import.', Icons.code, Colors.purple, isSmallScreen),
       const SizedBox(height: 16),
       Text('Backup Strategy:', style: TextStyle(fontSize: isSmallScreen ? 16 : 18, fontWeight: FontWeight.w600, color: widget.isDarkMode ? Colors.white : Colors.black)),
       const SizedBox(height: 12),
@@ -288,7 +288,7 @@ class _ImportExportDialogState extends State<ImportExportDialog> with SingleTick
           Text('Frequency:', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: widget.isDarkMode ? Colors.orange[100] : Colors.orange[800])),
           Text('Maintain regular backup intervals based on your transaction activity and risk tolerance.', style: TextStyle(fontSize: 12, color: widget.isDarkMode ? Colors.orange[100] : Colors.orange[800])),
           SizedBox(height: 8), Text('Formats:', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: widget.isDarkMode ? Colors.orange[100] : Colors.orange[800])),
-          Text('Use CSV for universal data compatibility and JSON for comprehensive app state preservation.', style: TextStyle(fontSize: 12, color: widget.isDarkMode ? Colors.orange[100] : Colors.orange[800])),
+          Text('Use CSV for spreadsheets (plaintext). Use JSON to restore the app; it is encrypted with the Security Settings backup password.', style: TextStyle(fontSize: 12, color: widget.isDarkMode ? Colors.orange[100] : Colors.orange[800])),
         ]),
       ),
       const SizedBox(height: 16),
@@ -306,7 +306,10 @@ class _ImportExportDialogState extends State<ImportExportDialog> with SingleTick
             SizedBox(height: 4),
             Text('• All exported files are automatically saved to app storage for backup', style: TextStyle(fontSize: 12, color: widget.isDarkMode ? Colors.blue[100] : Colors.blue[800])), // UPDATED
             Text('• JSON preserves all your app settings and preferences', style: TextStyle(fontSize: 12, color: widget.isDarkMode ? Colors.blue[100] : Colors.blue[800])),
-            Text('• Exported files are not encrypted — keep them private', style: TextStyle(fontSize: 12, color: widget.isDarkMode ? Colors.blue[100] : Colors.blue[800])),
+            Text('• Set the JSON backup password in Security Settings before export (not your app PIN)', style: TextStyle(fontSize: 12, color: widget.isDarkMode ? Colors.blue[100] : Colors.blue[800])),
+            Text('• After reinstall, set the same JSON password in Security Settings, then import the file', style: TextStyle(fontSize: 12, color: widget.isDarkMode ? Colors.blue[100] : Colors.blue[800])),
+            Text('• Changing that password means older JSON files still need the previous one', style: TextStyle(fontSize: 12, color: widget.isDarkMode ? Colors.blue[100] : Colors.blue[800])),
+            Text('• JSON is encrypted; CSV and PDF are plaintext — keep those private', style: TextStyle(fontSize: 12, color: widget.isDarkMode ? Colors.blue[100] : Colors.blue[800])),
             Text('• You can save additional copies to any folder location on your device', style: TextStyle(fontSize: 12, color: widget.isDarkMode ? Colors.blue[100] : Colors.blue[800])), // UPDATED
           ],
         ),
@@ -359,7 +362,7 @@ class _ImportExportDialogState extends State<ImportExportDialog> with SingleTick
       Text('Export Your Data', style: TextStyle(fontSize: isSmallScreen ? 16 : 18, fontWeight: FontWeight.w600, color: widget.isDarkMode ? Colors.white : Colors.black)),
       const SizedBox(height: 8),
       Text(
-        'JSON, CSV, and PDF files are plaintext — anyone with the file can read your trades.',
+        'JSON is encrypted with the password in Security Settings. CSV and PDF are plaintext.',
         style: TextStyle(fontSize: isSmallScreen ? 12 : 14, color: widget.isDarkMode ? Colors.white70 : Colors.black54),
         textAlign: TextAlign.center,
       ),
@@ -373,7 +376,7 @@ class _ImportExportDialogState extends State<ImportExportDialog> with SingleTick
           Navigator.of(context).pop();
           widget.onSaveCsvReport(context);
         }, isSmallScreen: isSmallScreen),
-        const SizedBox(height: 12), _buildOption(icon: Icons.backup, title: 'Save JSON Backup', color: Colors.purple, onTap: () {
+        const SizedBox(height: 12), _buildOption(icon: Icons.backup, title: 'Save Encrypted JSON', color: Colors.purple, onTap: () {
           Navigator.of(context).pop();
           widget.onSaveJsonBackup(context);
         }, isSmallScreen: isSmallScreen),
@@ -383,7 +386,7 @@ class _ImportExportDialogState extends State<ImportExportDialog> with SingleTick
         child: Row(children: [
           Icon(Icons.warning_amber_rounded, color: Colors.orange, size: isSmallScreen ? 16 : 18),
           const SizedBox(width: 8),
-          Expanded(child: Text('Treat exports like financial documents. Store them somewhere only you can open.', style: TextStyle(color: widget.isDarkMode ? Colors.orange[100] : Colors.orange[800], fontSize: isSmallScreen ? 12 : 14, fontWeight: FontWeight.w500))),
+          Expanded(child: Text('Set the JSON backup password in Security Settings first. CSV and PDF stay readable to anyone with the file.', style: TextStyle(color: widget.isDarkMode ? Colors.orange[100] : Colors.orange[800], fontSize: isSmallScreen ? 12 : 14, fontWeight: FontWeight.w500))),
         ]),
       ),
     ]));
@@ -393,7 +396,7 @@ class _ImportExportDialogState extends State<ImportExportDialog> with SingleTick
     return SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
       Text('Import Data', style: TextStyle(fontSize: isSmallScreen ? 16 : 18, fontWeight: FontWeight.w600, color: widget.isDarkMode ? Colors.white : Colors.black)),
       const SizedBox(height: 8),
-      Text('Restore your portfolio from backup', style: TextStyle(fontSize: isSmallScreen ? 12 : 14, color: widget.isDarkMode ? Colors.white70 : Colors.black54), textAlign: TextAlign.center),
+      Text('After a reinstall, enter the JSON password in Security Settings, then import the file.', style: TextStyle(fontSize: isSmallScreen ? 12 : 14, color: widget.isDarkMode ? Colors.white70 : Colors.black54), textAlign: TextAlign.center),
       const SizedBox(height: 20),
       Column(children: [
         _buildOption(icon: Icons.file_upload, title: 'CSV File', color: Colors.orange, onTap: () {
@@ -475,6 +478,10 @@ class _ImportExportDialogState extends State<ImportExportDialog> with SingleTick
           Text(formatDate(modified), style: TextStyle(fontSize: isSmallScreen ? 10 : 11, color: widget.isDarkMode ? Colors.white54 : Colors.black45)),
         ]), trailing: _isSelecting ? null : PopupMenuButton<String>(
           icon: Icon(Icons.more_vert, color: widget.isDarkMode ? Colors.white54 : Colors.black54),
+          color: widget.isDarkMode ? const Color(0xFF2D2D2D) : Colors.white,
+          surfaceTintColor: Colors.transparent,
+          elevation: 8,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           onSelected: (value) async {
             if (value == 'open') await _openFile(filePath, fileName);
             else if (value == 'share') await _shareFile(filePath, fileName);

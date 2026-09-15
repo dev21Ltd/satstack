@@ -1,7 +1,7 @@
-SatStack 1.0.2
+SatStack 1.0.3
 
-Security: PIN hashes and wraps the encrypted local database. Boxes stay closed until unlock. Auto-lock clears session data. Android backup is off. Screenshots are blocked.
+JSON backups are encrypted with the password in Security Settings (not the app PIN). After reinstall, enter that password, then import the JSON file. CSV and PDF stay plaintext.
 
-Portfolio: clearer chart dates, trade clusters, 3-year range, and trade-date FX when history is available.
+Chart: purchase marks, extra time ranges (2Y–10Y), and clearer axis labels.
 
-Backups: JSON, CSV, and PDF are plaintext — anyone with the file can read your trades. Treat them like financial documents.
+App PIN and JSON password are separate in Security Settings.

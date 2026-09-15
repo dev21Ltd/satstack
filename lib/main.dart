@@ -87,6 +87,13 @@ class MyApp extends StatelessWidget {
                 backgroundColor: bitcoinOrange,
               ),
               cardColor: const Color(0xFF1E1E1E),
+              popupMenuTheme: PopupMenuThemeData(
+                color: const Color(0xFF2D2D2D),
+                surfaceTintColor: Colors.transparent,
+                elevation: 8,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                textStyle: const TextStyle(color: Colors.white, fontSize: 14),
+              ),
               textTheme: const TextTheme(
                 bodyLarge: TextStyle(fontSize: 16.0),
                 bodyMedium: TextStyle(fontSize: 14.0),
@@ -105,6 +112,13 @@ class MyApp extends StatelessWidget {
                 backgroundColor: bitcoinOrange,
               ),
               cardColor: Colors.grey[200],
+              popupMenuTheme: PopupMenuThemeData(
+                color: Colors.white,
+                surfaceTintColor: Colors.transparent,
+                elevation: 8,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                textStyle: const TextStyle(color: Colors.black, fontSize: 14),
+              ),
               textTheme: const TextTheme(
                 bodyLarge: TextStyle(fontSize: 16.0),
                 bodyMedium: TextStyle(fontSize: 14.0),

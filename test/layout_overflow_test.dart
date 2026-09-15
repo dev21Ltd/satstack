@@ -165,6 +165,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     expect(find.text('1M'), findsOneWidget);
+    expect(find.text('2Y'), findsOneWidget);
+    expect(find.text('10Y'), findsOneWidget);
     expect(find.text('Max'), findsOneWidget);
     expect(find.text('Stack Value'), findsWidgets);
     expect(find.text('Total Investment'), findsOneWidget);

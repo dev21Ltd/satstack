@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.3 (2026-09-15)
+
+Android version code **9**.
+
+- Portfolio chart: original purchase/sale marks, extra time ranges (2Y–10Y), dollar labels kept at the line, dates kept off the $ column.
+- JSON backups are encrypted with a password saved in **Security Settings** (not the app PIN). Export/import use that password with the file picker only.
+- After reinstall, enter the same JSON password in Security, then import the JSON file. CSV/PDF are plaintext reports, not the encrypted restore.
+- Security Settings splits **App PIN** and **JSON password**.
+- Overflow menu matches the app theme.
+
 ## 1.0.2 (2026-09-14)
 
 Android version code **8**.

@@ -69,10 +69,13 @@ class _SecuritySettingsDialogState extends State<SecuritySettingsDialog> {
   final TextEditingController _confirmPinController = TextEditingController();
   final TextEditingController _questionController = TextEditingController();
   final TextEditingController _answerController = TextEditingController();
+  final TextEditingController _jsonBackupPasswordController = TextEditingController();
+  final TextEditingController _jsonBackupConfirmController = TextEditingController();
   String _selectedSecurityType = SecurityService.noSecurity;
   bool _isSettingUp = false;
   bool _obscurePin = true;
   bool _obscureConfirmPin = true;
+  bool _obscureJsonBackup = true;
 
   @override
   void initState() {
@@ -82,7 +85,21 @@ class _SecuritySettingsDialogState extends State<SecuritySettingsDialog> {
 
   Future<void> _loadSecuritySettings() async {
     final type = await _securityService.getSecurityType();
-    setState(() => _selectedSecurityType = type);
+    if (!mounted) return;
+    setState(() {
+      _selectedSecurityType = type;
+    });
+  }
+
+  @override
+  void dispose() {
+    _pinController.dispose();
+    _confirmPinController.dispose();
+    _questionController.dispose();
+    _answerController.dispose();
+    _jsonBackupPasswordController.dispose();
+    _jsonBackupConfirmController.dispose();
+    super.dispose();
   }
 
   @override
@@ -106,12 +123,15 @@ class _SecuritySettingsDialogState extends State<SecuritySettingsDialog> {
               const SizedBox(width: 12),
               Expanded(child: Text('Security Settings', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: textColor), overflow: TextOverflow.ellipsis)),
             ]),
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
+            _buildSectionLabel('App PIN', textColor),
             _buildSecurityTypeDropdown(textColor, cardColor, borderColor),
             if (_selectedSecurityType == SecurityService.pinSecurity && _isSettingUp)
               _buildPinSetup(textColor, cardColor),
             if (_selectedSecurityType != SecurityService.noSecurity && _isSettingUp)
               _buildBackupQuestion(textColor, cardColor),
+            _buildSectionLabel('JSON password', textColor),
+            _buildJsonBackupPassword(textColor, cardColor),
             const SizedBox(height: 20),
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
@@ -134,12 +154,21 @@ class _SecuritySettingsDialogState extends State<SecuritySettingsDialog> {
     );
   }
 
+  Widget _buildSectionLabel(String title, Color textColor) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Text(
+        title,
+        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: textColor),
+      ),
+    );
+  }
+
   Widget _buildSecurityTypeDropdown(Color textColor, Color cardColor, Color borderColor) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Security Type', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: textColor)),
-        const SizedBox(height: 8),
+        const SizedBox(height: 4),
         Container(
           decoration: BoxDecoration(color: cardColor, borderRadius: BorderRadius.circular(8), border: Border.all(color: borderColor)),
           padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -170,13 +199,7 @@ class _SecuritySettingsDialogState extends State<SecuritySettingsDialog> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Set PIN Code', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: textColor)),
         const SizedBox(height: 4),
-        Text(
-          'Locks the app and wraps local storage. It does not encrypt the whole phone, and exported files stay readable.',
-          style: TextStyle(fontSize: 12, color: textColor.withOpacity(0.7)),
-        ),
-        const SizedBox(height: 8),
         TextField(
           controller: _pinController,
           obscureText: _obscurePin,
@@ -251,7 +274,7 @@ class _SecuritySettingsDialogState extends State<SecuritySettingsDialog> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Security Question (For recovery)', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: textColor)),
+        Text('PIN recovery', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: textColor)),
         const SizedBox(height: 8),
         TextField(
           controller: _questionController,
@@ -267,6 +290,56 @@ class _SecuritySettingsDialogState extends State<SecuritySettingsDialog> {
           autocorrect: false,
           contextMenuBuilder: (context, state) => const SizedBox.shrink(),
           decoration: InputDecoration(labelText: 'Answer', border: const OutlineInputBorder(), filled: true, fillColor: cardColor),
+          style: TextStyle(color: textColor),
+        ),
+        const SizedBox(height: 16),
+      ],
+    );
+  }
+
+  Widget _buildJsonBackupPassword(Color textColor, Color cardColor) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Encrypts JSON backups. Not the app PIN. After a reinstall, type this same password here, then import the file.',
+          style: TextStyle(fontSize: 12, color: textColor.withOpacity(0.7)),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _jsonBackupPasswordController,
+          obscureText: _obscureJsonBackup,
+          autocorrect: false,
+          enableSuggestions: false,
+          keyboardType: TextInputType.visiblePassword,
+          decoration: InputDecoration(
+            labelText: 'JSON password (min $backupMinPasswordLength characters)',
+            border: const OutlineInputBorder(),
+            filled: true,
+            fillColor: cardColor,
+            suffixIcon: IconButton(
+              icon: Icon(
+                _obscureJsonBackup ? Icons.visibility_off : Icons.visibility,
+                color: textColor.withOpacity(0.6),
+              ),
+              onPressed: () => setState(() => _obscureJsonBackup = !_obscureJsonBackup),
+            ),
+          ),
+          style: TextStyle(color: textColor),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _jsonBackupConfirmController,
+          obscureText: true,
+          autocorrect: false,
+          enableSuggestions: false,
+          keyboardType: TextInputType.visiblePassword,
+          decoration: InputDecoration(
+            labelText: 'Confirm JSON backup password',
+            border: const OutlineInputBorder(),
+            filled: true,
+            fillColor: cardColor,
+          ),
           style: TextStyle(color: textColor),
         ),
         const SizedBox(height: 16),
@@ -297,6 +370,24 @@ class _SecuritySettingsDialogState extends State<SecuritySettingsDialog> {
     }
 
     await _securityService.setSecurityType(_selectedSecurityType);
+
+    final jsonPassword = _jsonBackupPasswordController.text;
+    if (jsonPassword.isNotEmpty) {
+      if (jsonPassword != _jsonBackupConfirmController.text) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('JSON backup passwords do not match')),
+        );
+        return;
+      }
+      try {
+        await _securityService.setJsonBackupPassword(jsonPassword);
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.toString().replaceFirst('Invalid argument(s): ', ''))),
+        );
+        return;
+      }
+    }
 
     final securityStatus = _selectedSecurityType == SecurityService.noSecurity ? 'App is now unlocked' : 'App is now secured with PIN';
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(securityStatus)));

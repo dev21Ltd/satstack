@@ -15,6 +15,7 @@ import 'app_state.dart';
 import 'constants.dart';
 import 'widgets.dart';
 import 'services.dart';
+import 'security_service.dart';
 import 'donation_widget.dart';
 import 'import_export_widget.dart';
 // ADDED: Import for URL launcher
@@ -201,28 +202,51 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     }
   }
 
+  Future<String?> _storedJsonBackupPassword() {
+    return SecurityService().getJsonBackupPassword();
+  }
+
   void _saveJsonBackup(BuildContext context) async {
+    final password = await _storedJsonBackupPassword();
+    if (!mounted) return;
+    if (password == null) {
+      _showMessengerSnack(
+        'Set a JSON backup password in Security Settings first. It is not your app PIN.',
+        Colors.red,
+      );
+      return;
+    }
     try {
       final storageService = StorageService();
-      await storageService.exportData(format: 'json', shareAfterSave: false);
-      await Future.delayed(100.ms);
-      if (mounted) _showSuccessAnimation('JSON Backup Saved!');
+      await storageService.exportData(format: 'json', shareAfterSave: false, backupPassword: password);
+      if (mounted) _showSuccessAnimation('Encrypted JSON Backup Saved!');
     } on SaveCancelledException {
       return;
     } catch (e) {
-      await Future.delayed(100.ms);
-      if (mounted) ScaffoldMessenger.of(this.context).showSnackBar(SnackBar(content: Text('Save failed: ${e.toString()}'), backgroundColor: Colors.red));
+      if (mounted) _showMessengerSnack('Save failed: $e', Colors.red);
     }
   }
 
   void _shareFile(BuildContext context, String format) async {
     try {
+      String? password;
+      if (format == 'json') {
+        password = await _storedJsonBackupPassword();
+        if (!mounted) return;
+        if (password == null) {
+          _showMessengerSnack(
+            'Set a JSON backup password in Security Settings first. It is not your app PIN.',
+            Colors.red,
+          );
+          return;
+        }
+      }
       final storageService = StorageService();
-      await storageService.exportData(format: format, shareAfterSave: true);
+      await storageService.exportData(format: format, shareAfterSave: true, backupPassword: password);
     } on SaveCancelledException {
       return;
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(this.context).showSnackBar(SnackBar(content: Text('Share failed: ${e.toString()}'), backgroundColor: Colors.red));
+      if (mounted) _showMessengerSnack('Share failed: $e', Colors.red);
     }
   }
 
@@ -233,6 +257,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
       print('Starting import with format: $format');
       await storageService.importData(format: format);
       print('Import completed, reloading app state...');
+      if (!mounted) return;
       await appState.reloadAllData();
       print('App state reloaded');
       if (!mounted) return;
@@ -241,30 +266,64 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
       );
     } on ImportCancelledException {
       return;
+    } on EncryptedBackupRequired catch (required) {
+      await _importEncryptedJson(required.json);
     } catch (e) {
       print('Import error: $e');
-      if (!mounted) return;
-      _showMessengerSnack('Import failed: $e', Colors.red);
+      _showImportError(e);
     }
+  }
+
+  Future<void> _importEncryptedJson(String json) async {
+    final password = await _storedJsonBackupPassword();
+    if (!mounted) return;
+    if (password == null) {
+      _showImportError(
+        'Set the JSON backup password in Security Settings (the one used when this file was exported), then import again.',
+      );
+      return;
+    }
+    try {
+      final appState = Provider.of<AppState>(this.context, listen: false);
+      await StorageService().importDataFromJsonString(json, backupPassword: password);
+      await appState.reloadAllData();
+      if (!mounted) return;
+      _showDoneSnack(
+        'Imported ${appState.purchases.length} purchases and ${appState.sales.length} sales',
+      );
+    } catch (e) {
+      _showImportError(e);
+    }
+  }
+
+  void _showImportError(Object error) {
+    final raw = error.toString().toLowerCase();
+    final message = raw.contains('invalid password') || raw.contains('corrupt')
+        ? 'Wrong JSON backup password. Set the password from export in Security Settings, then try again. Not your app PIN.'
+        : (error is String ? error : 'Import failed: $error');
+    _showMessengerSnack(message, Colors.red);
   }
 
   void _showJsonImportDialog(BuildContext context) {
     final controller = TextEditingController();
     showDialog(context: this.context, builder: (dialogContext) => AlertDialog(
       title: const Text('Paste JSON Data'),
-      content: TextField(controller: controller, maxLines: 10, decoration: const InputDecoration(hintText: 'Paste exported JSON data here', border: OutlineInputBorder())),
+      content: TextField(controller: controller, maxLines: 10, decoration: const InputDecoration(hintText: 'Paste JSON backup here', border: OutlineInputBorder())),
       actions: [
         TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
         ElevatedButton(onPressed: () async {
           try {
+            await StorageService().importDataFromJsonString(controller.text);
+            if (!mounted) return;
             final appState = Provider.of<AppState>(this.context, listen: false);
-            final storageService = StorageService();
-            await storageService.importDataFromJsonString(controller.text);
             await appState.reloadAllData();
             Navigator.pop(dialogContext);
             if (mounted) _showDoneSnack('JSON Imported Successfully!');
+          } on EncryptedBackupRequired catch (required) {
+            Navigator.pop(dialogContext);
+            await _importEncryptedJson(required.json);
           } catch (e) {
-            if (mounted) _showMessengerSnack('Import failed: $e', Colors.red);
+            _showImportError(e);
           }
         }, child: const Text('Import')),
       ],
@@ -383,6 +442,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
           ),
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert),
+            color: appState.isDarkMode ? const Color(0xFF2D2D2D) : Colors.white,
+            surfaceTintColor: Colors.transparent,
+            elevation: 8,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            offset: const Offset(0, 8),
             onSelected: (value) async {
               if (value == 'currency') _showCurrencySettings(appState);
               if (value == 'security') _showSecuritySettings(appState);
@@ -408,13 +472,25 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
                 }
               }
             },
-            itemBuilder: (BuildContext context) => [
-              const PopupMenuItem<String>(value: 'currency', child: Text('Currency Settings')),
-              const PopupMenuItem<String>(value: 'security', child: Text('Security Settings')),
-              PopupMenuItem<String>(value: 'theme', child: Text(appState.isDarkMode ? 'Light Mode' : 'Dark Mode')),
-              const PopupMenuItem<String>(value: 'privacy', child: Text('Privacy Policy')),
-              const PopupMenuItem<String>(value: 'terms', child: Text('Terms of Service')),
-            ],
+            itemBuilder: (BuildContext context) {
+              final menuColor = appState.isDarkMode ? Colors.white : Colors.black;
+              Widget item(IconData icon, String label) {
+                return Row(
+                  children: [
+                    Icon(icon, size: 20, color: menuColor.withOpacity(0.85)),
+                    const SizedBox(width: 12),
+                    Text(label, style: TextStyle(color: menuColor, fontSize: 14)),
+                  ],
+                );
+              }
+              return [
+                PopupMenuItem<String>(value: 'currency', child: item(Icons.currency_exchange, 'Currency Settings')),
+                PopupMenuItem<String>(value: 'security', child: item(Icons.lock_outline, 'Security Settings')),
+                PopupMenuItem<String>(value: 'theme', child: item(appState.isDarkMode ? Icons.light_mode_outlined : Icons.dark_mode_outlined, appState.isDarkMode ? 'Light Mode' : 'Dark Mode')),
+                PopupMenuItem<String>(value: 'privacy', child: item(Icons.privacy_tip_outlined, 'Privacy Policy')),
+                PopupMenuItem<String>(value: 'terms', child: item(Icons.description_outlined, 'Terms of Service')),
+              ];
+            },
           ),
         ],
       ),
