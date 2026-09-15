@@ -1,14 +1,21 @@
 import 'dart:convert';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
+import 'package:pointycastle/export.dart' as pc;
 
 const int pinHashIterations = 12000;
+const int pbkdf2Iterations = 600000;
 const int pinMinLength = 4;
 const int pinMaxLength = 6;
 const int maxAttemptsBeforeLockout = 5;
 const int backupMinPasswordLength = 8;
 const String encryptedBackupFormat = 'satstack-encrypted';
+const String kdfPbkdf2Id = 'pbkdf2-sha256-600000';
+const String kdfLegacySha256Id = 'sha256-iter-12000';
+const String algAesGcm = 'aes-256-gcm';
+const String algHmacStream = 'hmac-sha256-stream';
 
 class PinVerifyResult {
   final bool success;
@@ -46,7 +53,7 @@ class PinCrypto {
     return base64Encode(bytes);
   }
 
-  static String hashSecret(
+  static String hashSecretLegacySha256(
     String secret,
     String salt, {
     int iterations = pinHashIterations,
@@ -56,6 +63,58 @@ class PinCrypto {
       digest = sha256.convert(digest.bytes);
     }
     return digest.toString();
+  }
+
+  static String hashSecret(
+    String secret,
+    String salt, {
+    int iterations = pbkdf2Iterations,
+  }) {
+    final dk = pbkdf2HmacSha256(
+      password: utf8.encode(secret),
+      salt: utf8.encode(salt),
+      iterations: iterations,
+    );
+    return dk.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+  }
+
+  static String hashSecretWithKdf(String secret, String salt, String? kdf) {
+    if (kdf == null || kdf.startsWith('sha256-iter')) {
+      return hashSecretLegacySha256(secret, salt);
+    }
+    return hashSecret(secret, salt);
+  }
+
+  static List<int> pbkdf2HmacSha256({
+    required List<int> password,
+    required List<int> salt,
+    int iterations = pbkdf2Iterations,
+    int length = 32,
+  }) {
+    if (iterations < 1 || length < 1) {
+      throw ArgumentError('Invalid PBKDF2 parameters');
+    }
+    final hmac = Hmac(sha256, password);
+    final blockCount = (length + 31) ~/ 32;
+    final out = <int>[];
+    for (var blockIndex = 1; blockIndex <= blockCount; blockIndex++) {
+      final block = Uint8List(salt.length + 4);
+      block.setAll(0, salt);
+      block[salt.length] = (blockIndex >> 24) & 0xff;
+      block[salt.length + 1] = (blockIndex >> 16) & 0xff;
+      block[salt.length + 2] = (blockIndex >> 8) & 0xff;
+      block[salt.length + 3] = blockIndex & 0xff;
+      var u = hmac.convert(block).bytes;
+      final t = List<int>.from(u);
+      for (var j = 1; j < iterations; j++) {
+        u = hmac.convert(u).bytes;
+        for (var k = 0; k < t.length; k++) {
+          t[k] ^= u[k];
+        }
+      }
+      out.addAll(t);
+    }
+    return out.sublist(0, length);
   }
 
   static bool constantTimeEquals(String a, String b) {
@@ -102,14 +161,22 @@ class PinCrypto {
   static List<int> deriveKeyBytes(
     String secret,
     String salt, {
-    int iterations = pinHashIterations,
+    int iterations = pbkdf2Iterations,
+    String kdf = kdfPbkdf2Id,
   }) {
-    final hex = hashSecret(secret, salt, iterations: iterations);
-    final out = <int>[];
-    for (var i = 0; i + 1 < hex.length; i += 2) {
-      out.add(int.parse(hex.substring(i, i + 2), radix: 16));
+    if (kdf.startsWith('sha256-iter')) {
+      final hex = hashSecretLegacySha256(secret, salt, iterations: iterations);
+      final out = <int>[];
+      for (var i = 0; i + 1 < hex.length; i += 2) {
+        out.add(int.parse(hex.substring(i, i + 2), radix: 16));
+      }
+      return out;
     }
-    return out;
+    return pbkdf2HmacSha256(
+      password: utf8.encode(secret),
+      salt: base64Decode(salt),
+      iterations: iterations,
+    );
   }
 
   static List<int> _hmac(List<int> key, List<int> message) {
@@ -141,26 +208,89 @@ class PinCrypto {
     return out.sublist(0, length);
   }
 
-  static WrappedBytes wrapBytes(List<int> data, String password) {
+  static List<int> _aesGcmProcess({
+    required bool encrypt,
+    required List<int> key,
+    required List<int> nonce,
+    required List<int> data,
+  }) {
+    final cipher = pc.GCMBlockCipher(pc.AESEngine())
+      ..init(
+        encrypt,
+        pc.AEADParameters(
+          pc.KeyParameter(Uint8List.fromList(key)),
+          128,
+          Uint8List.fromList(nonce),
+          Uint8List(0),
+        ),
+      );
+    return cipher.process(Uint8List.fromList(data));
+  }
+
+  static WrappedBytes wrapBytes(
+    List<int> data,
+    String password, {
+    int iterations = pbkdf2Iterations,
+  }) {
     final salt = generateSalt();
-    final iv = List<int>.generate(16, (_) => Random.secure().nextInt(256));
-    final kek = deriveKeyBytes(password, salt);
-    final ks = _keystream(kek, iv, data.length);
-    final ct = List<int>.generate(data.length, (i) => data[i] ^ ks[i]);
-    final mac = _hmac(kek, [...iv, ...ct]);
+    final nonce = List<int>.generate(12, (_) => Random.secure().nextInt(256));
+    final kek = deriveKeyBytes(password, salt, iterations: iterations);
+    final packed = _aesGcmProcess(
+      encrypt: true,
+      key: kek,
+      nonce: nonce,
+      data: data,
+    );
     return WrappedBytes(
       salt: salt,
-      iv: base64Encode(iv),
-      ciphertext: base64Encode(ct),
-      mac: base64Encode(mac),
+      nonce: base64Encode(nonce),
+      ciphertext: base64Encode(packed),
+      kdf: kdfPbkdf2Id,
+      alg: algAesGcm,
+      iterations: iterations,
     );
   }
 
-  static List<int> unwrapBytes(String password, WrappedBytes wrapped) {
-    final kek = deriveKeyBytes(password, wrapped.salt);
-    final iv = base64Decode(wrapped.iv);
+  static List<int> unwrapBytes(
+    String password,
+    WrappedBytes wrapped, {
+    int? iterations,
+  }) {
+    if (wrapped.isAesGcm) {
+      final kek = deriveKeyBytes(
+        password,
+        wrapped.salt,
+        iterations: iterations ?? wrapped.iterations,
+        kdf: wrapped.kdf,
+      );
+      try {
+        return _aesGcmProcess(
+          encrypt: false,
+          key: kek,
+          nonce: base64Decode(wrapped.nonce!),
+          data: base64Decode(wrapped.ciphertext),
+        );
+      } catch (_) {
+        throw ArgumentError('Invalid password or corrupt data');
+      }
+    }
+    return _unwrapLegacyHmacStream(password, wrapped, iterations: iterations);
+  }
+
+  static List<int> _unwrapLegacyHmacStream(
+    String password,
+    WrappedBytes wrapped, {
+    int? iterations,
+  }) {
+    final kek = deriveKeyBytes(
+      password,
+      wrapped.salt,
+      iterations: iterations ?? wrapped.iterations,
+      kdf: wrapped.kdf.isEmpty ? kdfLegacySha256Id : wrapped.kdf,
+    );
+    final iv = base64Decode(wrapped.iv ?? '');
     final ct = base64Decode(wrapped.ciphertext);
-    final mac = base64Decode(wrapped.mac);
+    final mac = base64Decode(wrapped.mac ?? '');
     final expected = _hmac(kek, [...iv, ...ct]);
     if (!constantTimeBytes(mac, expected)) {
       throw ArgumentError('Invalid password or corrupt data');
@@ -169,12 +299,46 @@ class PinCrypto {
     return List<int>.generate(ct.length, (i) => ct[i] ^ ks[i]);
   }
 
-  static Map<String, dynamic> encryptBackup(String plaintext, String password) {
-    final wrapped = wrapBytes(utf8.encode(plaintext), password);
+  static WrappedBytes wrapLegacyHmacStreamForTest(
+    List<int> data,
+    String password, {
+    int iterations = pinHashIterations,
+  }) {
+    final salt = generateSalt();
+    final iv = List<int>.generate(16, (_) => Random.secure().nextInt(256));
+    final kek = deriveKeyBytes(
+      password,
+      salt,
+      iterations: iterations,
+      kdf: kdfLegacySha256Id,
+    );
+    final ks = _keystream(kek, iv, data.length);
+    final ct = List<int>.generate(data.length, (i) => data[i] ^ ks[i]);
+    final mac = _hmac(kek, [...iv, ...ct]);
+    return WrappedBytes(
+      salt: salt,
+      iv: base64Encode(iv),
+      ciphertext: base64Encode(ct),
+      mac: base64Encode(mac),
+      kdf: kdfLegacySha256Id,
+      alg: algHmacStream,
+      iterations: iterations,
+    );
+  }
+
+  static Map<String, dynamic> encryptBackup(
+    String plaintext,
+    String password, {
+    int iterations = pbkdf2Iterations,
+  }) {
+    final wrapped = wrapBytes(
+      utf8.encode(plaintext),
+      password,
+      iterations: iterations,
+    );
     return {
       'format': encryptedBackupFormat,
-      'version': 4,
-      'kdf': 'sha256-iter-$pinHashIterations',
+      'version': 5,
       ...wrapped.toJson(),
     };
   }
@@ -191,30 +355,54 @@ class PinCrypto {
 
 class WrappedBytes {
   final String salt;
-  final String iv;
+  final String? iv;
+  final String? nonce;
   final String ciphertext;
-  final String mac;
+  final String? mac;
+  final String kdf;
+  final String alg;
+  final int iterations;
 
   const WrappedBytes({
     required this.salt,
-    required this.iv,
     required this.ciphertext,
-    required this.mac,
+    this.iv,
+    this.nonce,
+    this.mac,
+    this.kdf = kdfPbkdf2Id,
+    this.alg = algAesGcm,
+    this.iterations = pbkdf2Iterations,
   });
 
-  Map<String, String> toJson() => {
+  bool get isAesGcm => alg == algAesGcm && nonce != null;
+
+  Map<String, dynamic> toJson() => {
         'salt': salt,
-        'iv': iv,
         'ciphertext': ciphertext,
-        'mac': mac,
+        'kdf': kdf,
+        'alg': alg,
+        'iterations': iterations,
+        if (nonce != null) 'nonce': nonce!,
+        if (iv != null) 'iv': iv!,
+        if (mac != null) 'mac': mac!,
       };
 
   factory WrappedBytes.fromJson(Map<String, dynamic> json) {
+    final alg = (json['alg'] as String?) ??
+        (json['nonce'] != null ? algAesGcm : algHmacStream);
+    final kdf = (json['kdf'] as String?) ??
+        (alg == algAesGcm ? kdfPbkdf2Id : kdfLegacySha256Id);
+    final iterations = (json['iterations'] as num?)?.toInt() ??
+        (alg == algAesGcm ? pbkdf2Iterations : pinHashIterations);
     return WrappedBytes(
       salt: json['salt'] as String,
-      iv: json['iv'] as String,
       ciphertext: json['ciphertext'] as String,
-      mac: json['mac'] as String,
+      iv: json['iv'] as String?,
+      nonce: json['nonce'] as String?,
+      mac: json['mac'] as String?,
+      kdf: kdf,
+      alg: alg,
+      iterations: iterations,
     );
   }
 }

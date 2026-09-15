@@ -1,7 +1,4 @@
-SatStack 1.0.3
+SatStack 1.0.4
 
-JSON backups are encrypted with the password in Security Settings (not the app PIN). After reinstall, enter that password, then import the JSON file. CSV and PDF stay plaintext.
-
-Chart: purchase marks, extra time ranges (2Y–10Y), and clearer axis labels.
-
-App PIN and JSON password are separate in Security Settings.
+• Stronger PIN and backup encryption
+• Recovery unlock fix

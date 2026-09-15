@@ -34,6 +34,8 @@ class SecurityService {
   static const String _wrappedRecoveryKey = 'hive_key_wrapped_recovery';
   static const String _migrationCompletedKey = 'migration_completed';
   static const String _jsonBackupPasswordKey = 'json_backup_password';
+  static const String _pinKdfKey = 'pin_kdf';
+  static const String _backupAnswerKdfKey = 'backup_answer_kdf';
 
   Uint8List? _sessionKey;
 
@@ -71,6 +73,7 @@ class SecurityService {
     final hash = PinCrypto.hashSecret(pin, salt);
     await _storage.write(key: _pinSaltKey, value: salt);
     await _storage.write(key: _pinHashKey, value: hash);
+    await _storage.write(key: _pinKdfKey, value: kdfPbkdf2Id);
     await _storage.delete(key: _legacyPinCodeKey);
     await _resetAttempts();
     final key = await _ensureSessionKey();
@@ -88,6 +91,7 @@ class SecurityService {
     await _storage.write(key: _backupQuestionKey, value: question.trim());
     await _storage.write(key: _backupAnswerSaltKey, value: salt);
     await _storage.write(key: _backupAnswerHashKey, value: hash);
+    await _storage.write(key: _backupAnswerKdfKey, value: kdfPbkdf2Id);
     await _storage.delete(key: _legacyBackupAnswerKey);
     final key = await _ensureSessionKey();
     await _storeWrapped(_wrappedRecoveryKey, key, normalized);
@@ -132,8 +136,8 @@ class SecurityService {
 
     final ok = await _matchesPin(pin);
     if (ok) {
-      await _upgradeLegacyPinIfNeeded(pin);
       await unlockWithPin(pin);
+      await _upgradeLegacyPinIfNeeded(pin);
       await _resetAttempts();
       return const PinVerifyResult.ok();
     }
@@ -146,8 +150,8 @@ class SecurityService {
 
     final ok = await _matchesBackupAnswer(answer);
     if (ok) {
-      await _upgradeLegacyBackupAnswerIfNeeded(answer);
       await unlockWithRecovery(answer);
+      await _upgradeLegacyBackupAnswerIfNeeded(answer);
       await _resetAttempts();
       return const PinVerifyResult.ok();
     }
@@ -205,6 +209,8 @@ class SecurityService {
       return;
     }
     _sessionKey = await _readOrCreatePlaintextKey();
+    await _storeWrapped(_wrappedRecoveryKey, _sessionKey!, normalized);
+    await _storage.delete(key: _encryptionKey);
   }
 
   Future<Uint8List> getEncryptionKey() async {
@@ -257,6 +263,8 @@ class SecurityService {
     await _storage.delete(key: _legacyPinCodeKey);
     await _storage.delete(key: _pinHashKey);
     await _storage.delete(key: _pinSaltKey);
+    await _storage.delete(key: _pinKdfKey);
+    await _storage.delete(key: _backupAnswerKdfKey);
     await _storage.delete(key: _backupQuestionKey);
     await _storage.delete(key: _legacyBackupAnswerKey);
     await _storage.delete(key: _backupAnswerHashKey);
@@ -268,7 +276,8 @@ class SecurityService {
     final hash = await _storage.read(key: _pinHashKey);
     final salt = await _storage.read(key: _pinSaltKey);
     if (hash != null && salt != null) {
-      final computed = PinCrypto.hashSecret(pin, salt);
+      final kdf = await _storage.read(key: _pinKdfKey);
+      final computed = PinCrypto.hashSecretWithKdf(pin, salt, kdf);
       return PinCrypto.constantTimeEquals(computed, hash);
     }
     final legacy = await _storage.read(key: _legacyPinCodeKey);
@@ -281,11 +290,17 @@ class SecurityService {
 
   Future<void> _upgradeLegacyPinIfNeeded(String pin) async {
     final hash = await _storage.read(key: _pinHashKey);
-    if (hash != null) return;
+    final kdf = await _storage.read(key: _pinKdfKey);
+    final wrapped = await _storage.read(key: _wrappedPinKey);
+    final needsHash = hash == null || kdf != kdfPbkdf2Id;
+    final needsWrap = wrapped == null || !wrapped.contains(algAesGcm);
+    if (!needsHash && !needsWrap) return;
     final legacy = await _storage.read(key: _legacyPinCodeKey);
-    if (legacy != null && PinCrypto.isLegacySecret(legacy) && pin == legacy) {
-      await setPinCode(pin);
+    if (hash == null &&
+        (legacy == null || !PinCrypto.isLegacySecret(legacy) || pin != legacy)) {
+      return;
     }
+    await setPinCode(pin);
   }
 
   Future<bool> _matchesBackupAnswer(String answer) async {
@@ -293,7 +308,8 @@ class SecurityService {
     final hash = await _storage.read(key: _backupAnswerHashKey);
     final salt = await _storage.read(key: _backupAnswerSaltKey);
     if (hash != null && salt != null) {
-      final computed = PinCrypto.hashSecret(normalized, salt);
+      final kdf = await _storage.read(key: _backupAnswerKdfKey);
+      final computed = PinCrypto.hashSecretWithKdf(normalized, salt, kdf);
       return PinCrypto.constantTimeEquals(computed, hash);
     }
     final legacy = await _storage.read(key: _legacyBackupAnswerKey);
@@ -302,15 +318,21 @@ class SecurityService {
   }
 
   Future<void> _upgradeLegacyBackupAnswerIfNeeded(String answer) async {
-    final hash = await _storage.read(key: _backupAnswerHashKey);
-    if (hash != null) return;
     final question = await _storage.read(key: _backupQuestionKey);
+    if (question == null || question.isEmpty) return;
+    final hash = await _storage.read(key: _backupAnswerHashKey);
+    final kdf = await _storage.read(key: _backupAnswerKdfKey);
+    final wrapped = await _storage.read(key: _wrappedRecoveryKey);
+    final needsHash = hash == null || kdf != kdfPbkdf2Id;
+    final needsWrap = wrapped == null || !wrapped.contains(algAesGcm);
+    if (!needsHash && !needsWrap) return;
     final legacy = await _storage.read(key: _legacyBackupAnswerKey);
-    if (question != null &&
-        legacy != null &&
-        answer.trim().toLowerCase() == legacy.toLowerCase()) {
-      await setBackupQuestion(question, answer);
+    if (hash == null &&
+        (legacy == null ||
+            answer.trim().toLowerCase() != legacy.toLowerCase())) {
+      return;
     }
+    await setBackupQuestion(question, answer);
   }
 
   Future<PinVerifyResult?> _currentLockout() async {

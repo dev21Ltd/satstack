@@ -50,9 +50,10 @@ void main() {
     expect(PinCrypto.remainingAttempts(6), 4);
   });
 
-  test('wrapBytes round-trips and rejects a wrong password', () {
+  test('wrapBytes AES-GCM round-trips and rejects a wrong password', () {
     final secret = List<int>.generate(32, (i) => i);
-    final wrapped = PinCrypto.wrapBytes(secret, 'correct-password');
+    final wrapped = PinCrypto.wrapBytes(secret, 'correct-password', iterations: 32);
+    expect(wrapped.alg, algAesGcm);
     expect(PinCrypto.unwrapBytes('correct-password', wrapped), secret);
     expect(
       () => PinCrypto.unwrapBytes('wrong-password', wrapped),
@@ -60,10 +61,22 @@ void main() {
     );
   });
 
-  test('encrypted backup envelope round-trips', () {
+  test('legacy HMAC wrap still decrypts', () {
+    final secret = List<int>.generate(32, (i) => i);
+    final wrapped = PinCrypto.wrapLegacyHmacStreamForTest(
+      secret,
+      'legacy-pass',
+      iterations: 32,
+    );
+    expect(wrapped.alg, algHmacStream);
+    expect(PinCrypto.unwrapBytes('legacy-pass', wrapped), secret);
+  });
+
+  test('encrypted backup envelope round-trips with AES-GCM', () {
     const payload = '{"version":3,"purchases":[]}';
-    final envelope = PinCrypto.encryptBackup(payload, 'backup-secret');
+    final envelope = PinCrypto.encryptBackup(payload, 'backup-secret', iterations: 32);
     expect(PinCrypto.isEncryptedBackup(envelope), isTrue);
+    expect(envelope['version'], 5);
     expect(PinCrypto.decryptBackup(envelope, 'backup-secret'), payload);
   });
 }

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.4 (2026-09-15)
+
+Android version code **10**.
+
+- PIN, recovery, and JSON wrapping use PBKDF2 (600,000 iterations) and AES-256-GCM.
+- Older PIN hashes and JSON v4 files still open, then upgrade on the next successful unlock.
+- Recovery unlock no longer migrates before the Hive key is unwrapped.
+
 ## 1.0.3 (2026-09-15)
 
 Android version code **9**.
