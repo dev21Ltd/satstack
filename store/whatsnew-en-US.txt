@@ -1,4 +1,3 @@
 SatStack 1.0.4
 
-• Stronger PIN and backup encryption
-• Recovery unlock fix
+• Updated security
