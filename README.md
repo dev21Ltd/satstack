@@ -36,13 +36,13 @@ Full notes: [CHANGELOG.md](CHANGELOG.md)
 - 💰 **Multiple Currencies**: USD, GBP, EUR, CAD, AUD, JPY, CNY
 - 📈 **Real-time Prices**: Live Bitcoin price updates
 - 🔐 **Security**: PIN wraps the Hive AES key; boxes stay closed until unlock
-- 📱 **Platforms**: Android is the supported mobile target in this tree. Web compiles. iOS is not maintained here.
+- 📱 **Platforms**: Android (supported). Web compiles. iOS is not maintained in this tree.
 - 📤 **Export**: Encrypted JSON backups; plaintext CSV/PDF reports
 - 🎨 **Themes**: Dark/Light mode
 
 ## 📱 Download
 
-- **Google Play:** listing in progress (not live yet)
+- **Google Play:** [https://play.google.com/store/apps/details?id=com.dev21ltd.satstack](https://play.google.com/store/apps/details?id=com.dev21ltd.satstack)
 - **GitHub Releases:** https://github.com/dev21Ltd/satstack/releases
 - **Source:** clone this repo and run with Flutter
 - iOS / App Store is not maintained in this tree
@@ -50,7 +50,8 @@ Full notes: [CHANGELOG.md](CHANGELOG.md)
 ## 🚀 Getting Started
 
 ### For Users
-Android is the supported app. A Play Store listing is in progress. Until it is live, clone the repo or watch [Releases](https://github.com/dev21Ltd/satstack/releases).
+Android is the supported app. Get it on [Google Play](https://play.google.com/store/apps/details?id=com.dev21ltd.satstack) or watch [Releases](https://github.com/dev21Ltd/satstack/releases).
+
 
 ### For Developers
 ```bash
