@@ -1,7 +1,5 @@
-SatStack 1.0.4
+SatStack 1.0.5
 
-• Updated security
-• Encrypted JSON backups
-• Chart: trade marks and 1M–10Y ranges
-• App PIN and JSON password in Security Settings
-• Overflow menu theme
+• Faster PIN unlock
+• Full-screen chart and pinch-zoom
+• Per-range ROI (1M–Max)

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.5 (2026-09-21)
+
+Android version code **11**.
+
+- Faster PIN unlock (still AES-GCM; older slow wraps upgrade on next unlock).
+- Full-screen chart with pinch-zoom; landscape no longer overflows.
+- All-time ROI plus per-range ROI (1M–Max). 4Y matches all-time when history is shorter.
+- Dollar labels on the right; trade dots kept on 5Y/10Y/Max.
+
 ## 1.0.4 (2026-09-15)
 
 Android version code **10**.
