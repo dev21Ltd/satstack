@@ -1,5 +1,6 @@
 SatStack 1.0.5
 
 • Faster PIN unlock
-• Full-screen chart and pinch-zoom
+• Full-screen chart with pinch-zoom
 • Per-range ROI (1M–Max)
+• Landscape chart layout fix
