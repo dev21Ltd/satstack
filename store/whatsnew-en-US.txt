@@ -1,6 +1,5 @@
-SatStack 1.0.5
+SatStack 1.0.6
 
+• ROI by time range (1M–Max, through today)
 • Faster PIN unlock
-• Full-screen chart with pinch-zoom
-• Per-range ROI (1M–Max)
-• Landscape chart layout fix
+• Full-screen chart and pinch-zoom

@@ -4,6 +4,7 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
 import 'models.dart';
 import 'constants.dart';
+import 'portfolio_math.dart';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:flutter_animate/flutter_animate.dart';
@@ -981,46 +982,20 @@ class _PortfolioChartState extends State<PortfolioChart>
     });
   }
 
-  /// Return for the selected chip only (1M, 4Y, Max, …).
-  /// If the chip is longer than your history (e.g. 4Y with 3 years of buys),
-  /// this is the same as all-time ROI.
+  /// All purchases and sales from this chip's start **through today**.
+  /// 1Y = last year up to now. Edits are included because this reads live trades.
   double get _periodRoi {
     if (_portfolioData.isEmpty) return 0;
     if (_windowCoversAllHistory) return widget.profitLossPercentage;
-    final start = _portfolioData.first;
-    final end = _portfolioData.last;
-    final startMarket = start.btcAmount * _btcPriceOn(start.date);
-    final endMarket = widget.portfolioValue > 0
-        ? widget.portfolioValue
-        : end.portfolioValue;
-    if (!startMarket.isFinite || !endMarket.isFinite) return 0;
-
-    double cashIn = 0;
-    for (final purchase in widget.purchases) {
-      if (purchase.date.isAfter(start.date) && !purchase.date.isAfter(end.date)) {
-        cashIn += _convertCurrency(
-          purchase.totalCashSpent,
-          purchase.cashCurrency,
-          widget.currency,
-          purchase.date,
-        );
-      }
-    }
-    double cashOut = 0;
-    for (final sale in widget.sales) {
-      if (sale.date.isAfter(start.date) && !sale.date.isAfter(end.date)) {
-        cashOut += _convertCurrency(
-          sale.amountBTC * sale.price,
-          sale.originalCurrency,
-          widget.currency,
-          sale.date,
-        );
-      }
-    }
-
-    final capital = startMarket + cashIn;
-    if (capital.abs() < 1e-6) return 0;
-    return (endMarket - startMarket - cashIn + cashOut) / capital * 100;
+    return roiForActivityInRange(
+      purchases: widget.purchases,
+      sales: widget.sales,
+      start: _portfolioData.first.date,
+      end: DateTime.now(),
+      currency: widget.currency,
+      btcPrices: widget.btcPrices,
+      pricesOnDate: widget.pricesOnDate,
+    );
   }
 
   double _convertCurrency(double amount, Currency from, Currency to, [DateTime? date]) {

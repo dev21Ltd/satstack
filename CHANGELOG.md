@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.6 (2026-09-21)
+
+Android version code **12**.
+
+- Time-range ROI uses all purchases and sales from that start date through today (edits included). No buys in the window → 0%. Window covering full history matches all-time ROI.
+
 ## 1.0.5 (2026-09-21)
 
 Android version code **11**.

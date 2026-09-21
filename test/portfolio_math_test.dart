@@ -76,6 +76,42 @@ void main() {
     );
   });
 
+  test('roiForActivityInRange uses buys and sales from start through today', () {
+    final oldBuy = buy(btc: 1, price: 20000, date: DateTime(2020, 1, 1));
+    final recent = buy(btc: 1, price: 90000, date: DateTime(2026, 8, 1));
+    final sale = sell(btc: 0.2, price: 95000, date: DateTime(2026, 9, 1));
+    final start = DateTime(2026, 8, 1);
+    final end = DateTime(2026, 9, 21);
+    // Window: paid 90k, sold 0.2 at 95k, still 0.8 BTC at 100k
+    // (80000 + 19000 - 90000) / 90000 = 10%
+    expect(
+      roiForActivityInRange(
+        purchases: [oldBuy, recent],
+        sales: [sale],
+        start: start,
+        end: end,
+        currency: Currency.USD,
+        btcPrices: prices,
+      ),
+      closeTo(10, 0.05),
+    );
+  });
+
+  test('roiForActivityInRange is 0 when nothing was bought in the window', () {
+    final oldBuy = buy(btc: 1, price: 20000, date: DateTime(2020, 1, 1));
+    expect(
+      roiForActivityInRange(
+        purchases: [oldBuy],
+        sales: const [],
+        start: DateTime(2026, 8, 1),
+        end: DateTime(2026, 9, 21),
+        currency: Currency.USD,
+        btcPrices: prices,
+      ),
+      0,
+    );
+  });
+
   test('convertViaBtc uses BTC prices as current FX', () {
     expect(convertViaBtc(80000, Currency.GBP, Currency.USD, prices), 100000);
     expect(convertViaBtc(50, Currency.USD, Currency.USD, prices), 50);

@@ -1,6 +1,7 @@
 // app_state.dart - COMPLETE FIXED VERSION WITH PRECISE CURRENCY CONVERSION
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:hive/hive.dart';
 import 'package:intl/intl.dart';
@@ -9,6 +10,7 @@ import 'services.dart';
 import 'constants.dart';
 import 'historical_fx.dart';
 import 'portfolio_math.dart';
+import 'debug_seed.dart';
 
 class AppState with ChangeNotifier {
   final StorageService _storageService = StorageService();
@@ -180,6 +182,11 @@ class AppState with ChangeNotifier {
       print('Reloading all data...');
       await _loadPurchases();
       await _loadSales();
+      if (kDebugMode && const bool.fromEnvironment('SEED_DEMO')) {
+        await seedDemoPortfolio(_storageService);
+        await _loadPurchases();
+        await _loadSales();
+      }
       await _loadThemePreference();
       await _loadDenominationPreference();
       await _loadCurrencyPreferences();
@@ -242,6 +249,11 @@ class AppState with ChangeNotifier {
       print('Loading initial data...');
       await _loadPurchases();
       await _loadSales();
+      if (kDebugMode && const bool.fromEnvironment('SEED_DEMO')) {
+        await seedDemoPortfolio(_storageService);
+        await _loadPurchases();
+        await _loadSales();
+      }
       await _loadCurrencyPreferences();
       await _loadHoldingsHiddenPreference();
       _historicalFx.loadFromBox();

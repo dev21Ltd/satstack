@@ -1,6 +1,6 @@
 name: satstack
 description: "Bitcoin stack tracker"
-version: 1.0.5+11
+version: 1.0.6+12
 
 environment:
   sdk: '>=3.0.0 <4.0.0'

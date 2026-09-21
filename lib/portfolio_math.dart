@@ -85,6 +85,59 @@ double profitLossInCurrency({
   return current + sold - invested;
 }
 
+/// P&L for **all activity from [start] through [end] (today)**: every purchase
+/// and sale in that window (including later edits). Remaining net BTC from
+/// that window is valued at the live price. Same idea as all-time ROI.
+double roiForActivityInRange({
+  required List<Purchase> purchases,
+  required List<Sale> sales,
+  required DateTime start,
+  required DateTime end,
+  required Currency currency,
+  required Map<Currency, double> btcPrices,
+  PriceAt? pricesOnDate,
+}) {
+  final rangeStart = DateTime(start.year, start.month, start.day);
+  final rangeEnd = DateTime(end.year, end.month, end.day, 23, 59, 59);
+
+  double invested = 0;
+  double btcIn = 0;
+  for (final purchase in purchases) {
+    if (purchase.date.isBefore(rangeStart) || purchase.date.isAfter(rangeEnd)) {
+      continue;
+    }
+    final fx = pricesOnDate?.call(purchase.date) ?? btcPrices;
+    invested += convertViaBtc(
+      purchase.totalCashSpent,
+      purchase.cashCurrency,
+      currency,
+      fx,
+    );
+    btcIn += purchase.amountBTC;
+  }
+  if (invested <= 1e-9) return 0;
+
+  double sold = 0;
+  double btcOut = 0;
+  for (final sale in sales) {
+    if (sale.date.isBefore(rangeStart) || sale.date.isAfter(rangeEnd)) {
+      continue;
+    }
+    final fx = pricesOnDate?.call(sale.date) ?? btcPrices;
+    sold += convertViaBtc(
+      sale.amountBTC * sale.price,
+      sale.originalCurrency,
+      currency,
+      fx,
+    );
+    btcOut += sale.amountBTC;
+  }
+
+  final remainingBtc = btcIn - btcOut;
+  final current = remainingBtc > 0 ? remainingBtc * (btcPrices[currency] ?? 0) : 0.0;
+  return (current + sold - invested) / invested * 100;
+}
+
 double averagePurchasePriceInCurrency(
   List<Purchase> purchases,
   Currency to,
