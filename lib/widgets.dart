@@ -76,6 +76,7 @@ class _SecuritySettingsDialogState extends State<SecuritySettingsDialog> {
   bool _obscurePin = true;
   bool _obscureConfirmPin = true;
   bool _obscureJsonBackup = true;
+  bool _saving = false;
 
   @override
   void initState() {
@@ -137,14 +138,20 @@ class _SecuritySettingsDialogState extends State<SecuritySettingsDialog> {
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
+                  onPressed: _saving ? null : () => Navigator.of(context).pop(),
                   child: Text('Cancel', style: TextStyle(color: textColor.withOpacity(0.7))),
                 ),
                 const SizedBox(width: 8),
                 ElevatedButton(
-                  onPressed: _saveSecuritySettings,
+                  onPressed: _saving ? null : _saveSecuritySettings,
                   style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFF7931A), foregroundColor: Colors.black),
-                  child: const Text('Save'),
+                  child: _saving
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
+                        )
+                      : const Text('Save'),
                 ),
               ],
             ),
@@ -348,6 +355,7 @@ class _SecuritySettingsDialogState extends State<SecuritySettingsDialog> {
   }
 
   Future<void> _saveSecuritySettings() async {
+    if (_saving) return;
     if (_selectedSecurityType == SecurityService.pinSecurity && _isSettingUp) {
       if (!PinCrypto.isValidPin(_pinController.text)) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -365,15 +373,33 @@ class _SecuritySettingsDialogState extends State<SecuritySettingsDialog> {
         );
         return;
       }
-      await _securityService.setPinCode(_pinController.text);
-      await _securityService.setBackupQuestion(_questionController.text, _answerController.text);
+      setState(() => _saving = true);
+      try {
+        await Future.wait([
+          _securityService.setPinCode(_pinController.text),
+          _securityService.setBackupQuestion(
+            _questionController.text,
+            _answerController.text,
+          ),
+        ]);
+      } catch (e) {
+        if (!mounted) return;
+        setState(() => _saving = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.toString().replaceFirst('Invalid argument(s): ', ''))),
+        );
+        return;
+      }
     }
+
+    if (!_saving) setState(() => _saving = true);
 
     await _securityService.setSecurityType(_selectedSecurityType);
 
     final jsonPassword = _jsonBackupPasswordController.text;
     if (jsonPassword.isNotEmpty) {
       if (jsonPassword != _jsonBackupConfirmController.text) {
+        if (mounted) setState(() => _saving = false);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('JSON backup passwords do not match')),
         );
@@ -382,6 +408,7 @@ class _SecuritySettingsDialogState extends State<SecuritySettingsDialog> {
       try {
         await _securityService.setJsonBackupPassword(jsonPassword);
       } catch (e) {
+        if (mounted) setState(() => _saving = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(e.toString().replaceFirst('Invalid argument(s): ', ''))),
         );
@@ -389,7 +416,17 @@ class _SecuritySettingsDialogState extends State<SecuritySettingsDialog> {
       }
     }
 
-    final securityStatus = _selectedSecurityType == SecurityService.noSecurity ? 'App is now unlocked' : 'App is now secured with PIN';
+    final jsonChanged = jsonPassword.isNotEmpty;
+    final String securityStatus;
+    if (jsonChanged && !_isSettingUp) {
+      securityStatus = 'JSON password saved';
+    } else if (_selectedSecurityType == SecurityService.noSecurity) {
+      securityStatus = jsonChanged ? 'App unlocked. JSON password saved' : 'App is now unlocked';
+    } else if (jsonChanged) {
+      securityStatus = 'PIN and JSON password saved';
+    } else {
+      securityStatus = 'App is now secured with PIN';
+    }
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(securityStatus)));
 
     widget.onSecurityChanged?.call();
@@ -427,6 +464,7 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _lockedOut = false;
   bool _securityLoaded = false;
   bool _storageFailed = false;
+  bool _unlocking = false;
   String? _authError;
 
   @override
@@ -451,6 +489,11 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _authenticateWithPin() async {
+    if (_unlocking || _lockedOut) return;
+    setState(() {
+      _unlocking = true;
+      _authError = null;
+    });
     final result = await _securityService.verifyPin(_pinController.text);
     if (result.success) {
       try {
@@ -459,19 +502,25 @@ class _LoginScreenState extends State<LoginScreen> {
         }
       } catch (e) {
         if (!mounted) return;
-        setState(() => _authError = 'Could not open encrypted storage');
+        setState(() {
+          _unlocking = false;
+          _authError = 'Could not open encrypted storage';
+        });
         return;
       }
+      if (!mounted) return;
       setState(() {
         _isUnlocked = true;
         _authError = null;
         _lockedOut = false;
+        _unlocking = false;
       });
-      await Future.delayed(const Duration(milliseconds: 500));
       if (!mounted) return;
       Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (context) => widget.child));
     } else {
+      if (!mounted) return;
       setState(() {
+        _unlocking = false;
         _lockedOut = result.lockedOut;
         _authError = result.message;
       });
@@ -626,7 +675,10 @@ class _LoginScreenState extends State<LoginScreen> {
                 const SizedBox(height: 20),
                 Text(_isUnlocked ? 'App Unlocked' : 'Welcome Back', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: textColor)),
                 const SizedBox(height: 10),
-                Text(_isUnlocked ? 'Your app is now unlocked' : 'Please authenticate to continue',
+                Text(
+                    _unlocking
+                        ? 'Unlocking…'
+                        : (_isUnlocked ? 'Your app is now unlocked' : 'Please authenticate to continue'),
                     style: TextStyle(fontSize: 16, color: textColor.withOpacity(0.7))),
                 const SizedBox(height: 30),
                 if (_securityType == SecurityService.pinSecurity && !_isUnlocked) ..._buildPinInput(textColor, cardColor),
@@ -655,7 +707,7 @@ class _LoginScreenState extends State<LoginScreen> {
           enableInteractiveSelection: false,
           enableSuggestions: false,
           autocorrect: false,
-          enabled: !_lockedOut,
+          enabled: !_lockedOut && !_unlocking,
           contextMenuBuilder: (context, state) => const SizedBox.shrink(),
           inputFormatters: [
             FilteringTextInputFormatter.digitsOnly,
@@ -707,13 +759,19 @@ class _LoginScreenState extends State<LoginScreen> {
       ],
       const SizedBox(height: 20),
       ElevatedButton(
-        onPressed: _lockedOut ? null : _authenticateWithPin,
+        onPressed: (_lockedOut || _unlocking) ? null : _authenticateWithPin,
         style: ElevatedButton.styleFrom(
           backgroundColor: const Color(0xFFF7931A),
           foregroundColor: Colors.black,
           padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
         ),
-        child: const Text('Unlock'),
+        child: _unlocking
+            ? const SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
+              )
+            : const Text('Unlock'),
       ),
     ];
   }

@@ -168,6 +168,8 @@ void main() {
     expect(find.text('2Y'), findsOneWidget);
     expect(find.text('10Y'), findsOneWidget);
     expect(find.text('Max'), findsOneWidget);
+    expect(find.text('All-time ROI'), findsOneWidget);
+    expect(find.text('1M ROI'), findsOneWidget);
     expect(find.text('Stack Value'), findsWidgets);
     expect(find.text('Total Investment'), findsOneWidget);
   });

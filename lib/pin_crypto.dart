@@ -3,16 +3,20 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
 import 'package:pointycastle/export.dart' as pc;
 
 const int pinHashIterations = 12000;
-const int pbkdf2Iterations = 600000;
+/// PIN wrap must stay snappy on a phone. JSON files can afford more stretch.
+const int pbkdf2Iterations = 12000;
+const int backupPbkdf2Iterations = 100000;
+const int _slowKdfIsolateThreshold = 25000;
 const int pinMinLength = 4;
 const int pinMaxLength = 6;
 const int maxAttemptsBeforeLockout = 5;
 const int backupMinPasswordLength = 8;
 const String encryptedBackupFormat = 'satstack-encrypted';
-const String kdfPbkdf2Id = 'pbkdf2-sha256-600000';
+const String kdfPbkdf2Id = 'pbkdf2-sha256-12000';
 const String kdfLegacySha256Id = 'sha256-iter-12000';
 const String algAesGcm = 'aes-256-gcm';
 const String algHmacStream = 'hmac-sha256-stream';
@@ -78,11 +82,22 @@ class PinCrypto {
     return dk.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
   }
 
+  static int iterationsFromKdf(String? kdf) {
+    if (kdf == null || kdf.startsWith('sha256-iter')) {
+      return pinHashIterations;
+    }
+    final match = RegExp(r'pbkdf2-sha256-(\d+)').firstMatch(kdf);
+    if (match != null) {
+      return int.tryParse(match.group(1)!) ?? pbkdf2Iterations;
+    }
+    return pbkdf2Iterations;
+  }
+
   static String hashSecretWithKdf(String secret, String salt, String? kdf) {
     if (kdf == null || kdf.startsWith('sha256-iter')) {
       return hashSecretLegacySha256(secret, salt);
     }
-    return hashSecret(secret, salt);
+    return hashSecret(secret, salt, iterations: iterationsFromKdf(kdf));
   }
 
   static List<int> pbkdf2HmacSha256({
@@ -329,7 +344,7 @@ class PinCrypto {
   static Map<String, dynamic> encryptBackup(
     String plaintext,
     String password, {
-    int iterations = pbkdf2Iterations,
+    int iterations = backupPbkdf2Iterations,
   }) {
     final wrapped = wrapBytes(
       utf8.encode(plaintext),
@@ -351,6 +366,65 @@ class PinCrypto {
   static bool isEncryptedBackup(dynamic json) {
     return json is Map && json['format'] == encryptedBackupFormat;
   }
+
+  static Future<WrappedBytes> wrapBytesAsync(List<int> data, String password) async {
+    if (pbkdf2Iterations <= _slowKdfIsolateThreshold) {
+      return wrapBytes(data, password);
+    }
+    final json = await compute(_wrapBytesIsolate, <String, dynamic>{
+      'data': List<int>.from(data),
+      'password': password,
+    });
+    return WrappedBytes.fromJson(Map<String, dynamic>.from(json as Map));
+  }
+
+  static Future<List<int>> unwrapBytesAsync(String password, WrappedBytes wrapped) async {
+    if (wrapped.iterations <= _slowKdfIsolateThreshold) {
+      return unwrapBytes(password, wrapped);
+    }
+    return compute(_unwrapBytesIsolate, <String, dynamic>{
+      'password': password,
+      'wrapped': wrapped.toJson(),
+    });
+  }
+
+  static Future<String> hashSecretWithKdfAsync(
+    String secret,
+    String salt,
+    String? kdf,
+  ) async {
+    if (iterationsFromKdf(kdf) <= _slowKdfIsolateThreshold) {
+      return hashSecretWithKdf(secret, salt, kdf);
+    }
+    return compute(_hashSecretIsolate, <String, dynamic>{
+      'secret': secret,
+      'salt': salt,
+      'kdf': kdf,
+    });
+  }
+}
+
+Map<String, dynamic> _wrapBytesIsolate(Map<String, dynamic> message) {
+  final wrapped = PinCrypto.wrapBytes(
+    List<int>.from(message['data'] as List),
+    message['password'] as String,
+  );
+  return wrapped.toJson();
+}
+
+List<int> _unwrapBytesIsolate(Map<String, dynamic> message) {
+  return PinCrypto.unwrapBytes(
+    message['password'] as String,
+    WrappedBytes.fromJson(Map<String, dynamic>.from(message['wrapped'] as Map)),
+  );
+}
+
+String _hashSecretIsolate(Map<String, dynamic> message) {
+  return PinCrypto.hashSecretWithKdf(
+    message['secret'] as String,
+    message['salt'] as String,
+    message['kdf'] as String?,
+  );
 }
 
 class WrappedBytes {

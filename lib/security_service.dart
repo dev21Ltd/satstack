@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -38,6 +39,7 @@ class SecurityService {
   static const String _backupAnswerKdfKey = 'backup_answer_kdf';
 
   Uint8List? _sessionKey;
+  Uint8List? _pendingUnlockKey;
 
   bool get hasSessionKey => _sessionKey != null;
 
@@ -70,14 +72,17 @@ class SecurityService {
       throw ArgumentError('PIN must be $pinMinLength–$pinMaxLength digits');
     }
     final salt = PinCrypto.generateSalt();
-    final hash = PinCrypto.hashSecret(pin, salt);
+    final key = await _ensureSessionKey();
+    final hashFuture = PinCrypto.hashSecretWithKdfAsync(pin, salt, kdfPbkdf2Id);
+    final wrapFuture = PinCrypto.wrapBytesAsync(key, pin);
+    final hash = await hashFuture;
+    final wrapped = await wrapFuture;
     await _storage.write(key: _pinSaltKey, value: salt);
     await _storage.write(key: _pinHashKey, value: hash);
     await _storage.write(key: _pinKdfKey, value: kdfPbkdf2Id);
     await _storage.delete(key: _legacyPinCodeKey);
     await _resetAttempts();
-    final key = await _ensureSessionKey();
-    await _storeWrapped(_wrappedPinKey, key, pin);
+    await _storage.write(key: _wrappedPinKey, value: jsonEncode(wrapped.toJson()));
     await _storage.delete(key: _encryptionKey);
   }
 
@@ -87,14 +92,18 @@ class SecurityService {
       throw ArgumentError('Recovery question and answer are required');
     }
     final salt = PinCrypto.generateSalt();
-    final hash = PinCrypto.hashSecret(normalized, salt);
+    final key = await _ensureSessionKey();
+    final hashFuture =
+        PinCrypto.hashSecretWithKdfAsync(normalized, salt, kdfPbkdf2Id);
+    final wrapFuture = PinCrypto.wrapBytesAsync(key, normalized);
+    final hash = await hashFuture;
+    final wrapped = await wrapFuture;
     await _storage.write(key: _backupQuestionKey, value: question.trim());
     await _storage.write(key: _backupAnswerSaltKey, value: salt);
     await _storage.write(key: _backupAnswerHashKey, value: hash);
     await _storage.write(key: _backupAnswerKdfKey, value: kdfPbkdf2Id);
     await _storage.delete(key: _legacyBackupAnswerKey);
-    final key = await _ensureSessionKey();
-    await _storeWrapped(_wrappedRecoveryKey, key, normalized);
+    await _storage.write(key: _wrappedRecoveryKey, value: jsonEncode(wrapped.toJson()));
     await _storage.delete(key: _encryptionKey);
   }
 
@@ -137,8 +146,8 @@ class SecurityService {
     final ok = await _matchesPin(pin);
     if (ok) {
       await unlockWithPin(pin);
-      await _upgradeLegacyPinIfNeeded(pin);
       await _resetAttempts();
+      unawaited(_upgradeLegacyPinIfNeeded(pin));
       return const PinVerifyResult.ok();
     }
     return _registerFailure('Invalid PIN');
@@ -151,8 +160,8 @@ class SecurityService {
     final ok = await _matchesBackupAnswer(answer);
     if (ok) {
       await unlockWithRecovery(answer);
-      await _upgradeLegacyBackupAnswerIfNeeded(answer);
       await _resetAttempts();
+      unawaited(_upgradeLegacyBackupAnswerIfNeeded(answer));
       return const PinVerifyResult.ok();
     }
     return _registerFailure('Incorrect answer');
@@ -184,10 +193,18 @@ class SecurityService {
   }
 
   Future<void> unlockWithPin(String pin) async {
+    if (_pendingUnlockKey != null) {
+      _sessionKey = _pendingUnlockKey;
+      _pendingUnlockKey = null;
+      return;
+    }
     final wrapped = await _storage.read(key: _wrappedPinKey);
     if (wrapped != null) {
       _sessionKey = Uint8List.fromList(
-        PinCrypto.unwrapBytes(pin, WrappedBytes.fromJson(jsonDecode(wrapped))),
+        await PinCrypto.unwrapBytesAsync(
+          pin,
+          WrappedBytes.fromJson(jsonDecode(wrapped)),
+        ),
       );
       return;
     }
@@ -199,9 +216,14 @@ class SecurityService {
   Future<void> unlockWithRecovery(String answer) async {
     final normalized = answer.trim().toLowerCase();
     final wrapped = await _storage.read(key: _wrappedRecoveryKey);
+    if (_pendingUnlockKey != null) {
+      _sessionKey = _pendingUnlockKey;
+      _pendingUnlockKey = null;
+      return;
+    }
     if (wrapped != null) {
       _sessionKey = Uint8List.fromList(
-        PinCrypto.unwrapBytes(
+        await PinCrypto.unwrapBytesAsync(
           normalized,
           WrappedBytes.fromJson(jsonDecode(wrapped)),
         ),
@@ -254,7 +276,7 @@ class SecurityService {
   }
 
   Future<void> _storeWrapped(String storageKey, Uint8List key, String secret) async {
-    final wrapped = PinCrypto.wrapBytes(key, secret);
+    final wrapped = await PinCrypto.wrapBytesAsync(key, secret);
     await _storage.write(key: storageKey, value: jsonEncode(wrapped.toJson()));
   }
 
@@ -273,11 +295,26 @@ class SecurityService {
   }
 
   Future<bool> _matchesPin(String pin) async {
+    final wrapped = await _storage.read(key: _wrappedPinKey);
+    if (wrapped != null) {
+      try {
+        _pendingUnlockKey = Uint8List.fromList(
+          await PinCrypto.unwrapBytesAsync(
+            pin,
+            WrappedBytes.fromJson(jsonDecode(wrapped)),
+          ),
+        );
+        return true;
+      } catch (_) {
+        _pendingUnlockKey = null;
+        return false;
+      }
+    }
     final hash = await _storage.read(key: _pinHashKey);
     final salt = await _storage.read(key: _pinSaltKey);
     if (hash != null && salt != null) {
       final kdf = await _storage.read(key: _pinKdfKey);
-      final computed = PinCrypto.hashSecretWithKdf(pin, salt, kdf);
+      final computed = await PinCrypto.hashSecretWithKdfAsync(pin, salt, kdf);
       return PinCrypto.constantTimeEquals(computed, hash);
     }
     final legacy = await _storage.read(key: _legacyPinCodeKey);
@@ -307,9 +344,25 @@ class SecurityService {
     final normalized = answer.trim().toLowerCase();
     final hash = await _storage.read(key: _backupAnswerHashKey);
     final salt = await _storage.read(key: _backupAnswerSaltKey);
+    final wrapped = await _storage.read(key: _wrappedRecoveryKey);
+    if (wrapped != null) {
+      try {
+        _pendingUnlockKey = Uint8List.fromList(
+          await PinCrypto.unwrapBytesAsync(
+            normalized,
+            WrappedBytes.fromJson(jsonDecode(wrapped)),
+          ),
+        );
+        return true;
+      } catch (_) {
+        _pendingUnlockKey = null;
+        return false;
+      }
+    }
     if (hash != null && salt != null) {
       final kdf = await _storage.read(key: _backupAnswerKdfKey);
-      final computed = PinCrypto.hashSecretWithKdf(normalized, salt, kdf);
+      final computed =
+          await PinCrypto.hashSecretWithKdfAsync(normalized, salt, kdf);
       return PinCrypto.constantTimeEquals(computed, hash);
     }
     final legacy = await _storage.read(key: _legacyBackupAnswerKey);
