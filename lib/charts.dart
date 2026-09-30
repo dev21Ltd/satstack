@@ -88,11 +88,6 @@ class _PortfolioChartState extends State<PortfolioChart>
   final Map<int, _TradeCluster> _clusterByIndex = {};
   List<int> _stripBuys = [];
   List<int> _stripSells = [];
-  double? _viewMinX;
-  double? _viewMaxX;
-  double _scaleStartMinX = 0;
-  double _scaleStartMaxX = 1;
-  double _chartWidth = 1;
 
   final Color _portfolioColor = Color(0xFF34C759);
   final Color _investmentColor = Color(0xFF8E8E93);
@@ -135,61 +130,15 @@ class _PortfolioChartState extends State<PortfolioChart>
   void _setTimeRange(PortfolioTimeRange timeRange) {
     setState(() {
       _selectedTimeRange = timeRange;
-      _viewMinX = null;
-      _viewMaxX = null;
       _calculatePortfolioData(notify: false);
     });
   }
 
   double get _dataMaxX => math.max(1.0, (_portfolioData.length - 1).toDouble());
 
-  double get _minX => (_viewMinX ?? 0).clamp(0, _dataMaxX);
+  double get _minX => 0;
 
-  double get _maxX {
-    final max = _viewMaxX ?? _dataMaxX;
-    return max <= _minX ? _minX + 1 : max.clamp(_minX + 1, _dataMaxX);
-  }
-
-  bool get _isZoomed => _viewMinX != null || _viewMaxX != null;
-
-  void _resetZoom() {
-    setState(() {
-      _viewMinX = null;
-      _viewMaxX = null;
-    });
-  }
-
-  void _onScaleStart(ScaleStartDetails details) {
-    _scaleStartMinX = _minX;
-    _scaleStartMaxX = _maxX;
-  }
-
-  void _onScaleUpdate(ScaleUpdateDetails details) {
-    if (!widget.expanded || details.pointerCount < 2) return;
-    final startRange = _scaleStartMaxX - _scaleStartMinX;
-    if (startRange <= 0 || _chartWidth < 16) return;
-    final newRange = (startRange / details.scale).clamp(2.0, _dataMaxX);
-    final focalFrac = (details.localFocalPoint.dx / _chartWidth).clamp(0.0, 1.0);
-    final focalX = _scaleStartMinX + focalFrac * startRange;
-    var newMin = focalX - newRange * focalFrac;
-    var newMax = focalX + newRange * (1 - focalFrac);
-    final pan = details.focalPointDelta.dx * (startRange / _chartWidth);
-    newMin -= pan;
-    newMax -= pan;
-    if (newMin < 0) {
-      newMax -= newMin;
-      newMin = 0;
-    }
-    if (newMax > _dataMaxX) {
-      newMin -= (newMax - _dataMaxX);
-      newMax = _dataMaxX;
-      if (newMin < 0) newMin = 0;
-    }
-    setState(() {
-      _viewMinX = newMin;
-      _viewMaxX = newMax;
-    });
-  }
+  double get _maxX => _dataMaxX;
 
   void _openFullScreen() {
     Navigator.of(context).push(
@@ -1652,23 +1601,13 @@ class _PortfolioChartState extends State<PortfolioChart>
                   ),
                   onPressed: _openFullScreen,
                 ),
-              if (widget.expanded && _isZoomed)
-                IconButton(
-                  tooltip: 'Reset zoom',
-                  visualDensity: VisualDensity.compact,
-                  icon: Icon(
-                    Icons.zoom_out_map,
-                    color: widget.isDarkMode ? Colors.white70 : Colors.black54,
-                  ),
-                  onPressed: _resetZoom,
-                ),
             ],
           ),
           if (widget.expanded && !compact)
             Padding(
               padding: const EdgeInsets.only(top: 8, bottom: 4),
               child: Text(
-                'Pinch to zoom · tap a dot for trades',
+                'Tap a dot for trades',
                 style: TextStyle(
                   fontSize: 11,
                   color: widget.isDarkMode ? Colors.white54 : Colors.black54,
@@ -1806,15 +1745,8 @@ class _PortfolioChartState extends State<PortfolioChart>
                 if (!constraints.hasBoundedWidth || constraints.maxWidth < 16) {
                   return const SizedBox.expand();
                 }
-                _chartWidth = constraints.maxWidth;
                 try {
-                  final chart = LineChart(_buildChartData());
-                  if (!widget.expanded) return chart;
-                  return GestureDetector(
-                    onScaleStart: _onScaleStart,
-                    onScaleUpdate: _onScaleUpdate,
-                    child: chart,
-                  );
+                  return LineChart(_buildChartData());
                 } catch (e, st) {
                   print('LineChart error: $e\n$st');
                   return const Center(child: Text('Chart unavailable'));

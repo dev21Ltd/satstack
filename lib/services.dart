@@ -87,41 +87,115 @@ class ApiService {
     );
   }
 
-  static Future<Map<String, double>> fetchBtcPrices() async {
-    try {
-      return await _withRetry(() async {
-        final response = await _get(
-          Uri.parse('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd,gbp,eur,cad,aud,jpy,cny'),
-          timeout: const Duration(seconds: 10),
-        );
+  static const priceFiats = ['usd', 'gbp', 'eur', 'cad', 'aud', 'jpy', 'cny'];
 
-        if (response.statusCode == 200) {
-          final data = jsonDecode(response.body);
-          return {
-            'usd': (data['bitcoin']['usd'] as num).toDouble(),
-            'gbp': (data['bitcoin']['gbp'] as num).toDouble(),
-            'eur': (data['bitcoin']['eur'] as num).toDouble(),
-            'cad': (data['bitcoin']['cad'] as num).toDouble(),
-            'aud': (data['bitcoin']['aud'] as num).toDouble(),
-            'jpy': (data['bitcoin']['jpy'] as num).toDouble(),
-            'cny': (data['bitcoin']['cny'] as num).toDouble(),
-          };
-        } else if (response.statusCode == 429) {
-          throw RateLimitException();
-        } else {
-          throw ApiException('API returned status code: ${response.statusCode}', response.statusCode);
-        }
-      });
-    } on TlsPinException catch (e) {
-      throw NetworkException(e.toString());
-    } on http.ClientException catch (e) {
-      throw NetworkException('Network error: ${e.message}');
-    } on TimeoutException catch (_) {
-      throw ApiTimeoutException();
-    } catch (e) {
-      if (e is RateLimitException || e is ApiException || e is NetworkException) rethrow;
-      throw ApiException('Failed to load BTC prices: ${e.toString()}', -1);
+  /// Live BTC price in each app currency. One attempt per provider, in order:
+  /// CoinGecko, then Coinbase, then Blockchain.com.
+  static Future<Map<String, double>> fetchBtcPrices() async {
+    Object? last;
+    for (final load in <Future<Map<String, double>> Function()>[
+      _loadCoinGeckoPrices,
+      _loadCoinbasePrices,
+      _loadBlockchainPrices,
+    ]) {
+      try {
+        return await load();
+      } catch (e) {
+        last = _asPriceError(e);
+      }
     }
+    if (last != null) throw last;
+    throw ApiException('Failed to load BTC prices', -1);
+  }
+
+  static Future<Map<String, double>> _loadCoinGeckoPrices() async {
+    final response = await _get(
+      Uri.parse('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd,gbp,eur,cad,aud,jpy,cny'),
+      timeout: const Duration(seconds: 10),
+    );
+    return btcPricesFromCoinGecko(_decodePriceJson(response));
+  }
+
+  static Future<Map<String, double>> _loadCoinbasePrices() async {
+    final response = await _get(
+      Uri.parse('https://api.coinbase.com/v2/exchange-rates?currency=BTC'),
+      timeout: const Duration(seconds: 10),
+    );
+    return btcPricesFromCoinbase(_decodePriceJson(response));
+  }
+
+  static Future<Map<String, double>> _loadBlockchainPrices() async {
+    final response = await _get(
+      Uri.parse('https://blockchain.info/ticker'),
+      timeout: const Duration(seconds: 10),
+    );
+    return btcPricesFromBlockchain(_decodePriceJson(response));
+  }
+
+  static Object _decodePriceJson(PinnedHttpResponse response) {
+    if (response.statusCode == 429) throw RateLimitException();
+    if (response.statusCode != 200) {
+      throw ApiException('API returned status code: ${response.statusCode}', response.statusCode);
+    }
+    return jsonDecode(response.body);
+  }
+
+  static Object _asPriceError(Object error) {
+    if (error is RateLimitException ||
+        error is ApiException ||
+        error is NetworkException ||
+        error is ApiTimeoutException) {
+      return error;
+    }
+    if (error is TlsPinException) return NetworkException(error.toString());
+    if (error is http.ClientException) return NetworkException('Network error: ${error.message}');
+    if (error is TimeoutException) return ApiTimeoutException();
+    return ApiException('Failed to load BTC prices: $error', -1);
+  }
+
+  static Map<String, double> btcPricesFromCoinGecko(Object? data) {
+    if (data is! Map) throw ApiException('Incomplete BTC prices', -1);
+    final bitcoin = data['bitcoin'];
+    if (bitcoin is! Map) throw ApiException('Incomplete BTC prices', -1);
+    return _fiatMap(bitcoin);
+  }
+
+  static Map<String, double> btcPricesFromCoinbase(Object? data) {
+    if (data is! Map) throw ApiException('Incomplete BTC prices', -1);
+    final payload = data['data'];
+    if (payload is! Map) throw ApiException('Incomplete BTC prices', -1);
+    final rates = payload['rates'];
+    if (rates is! Map) throw ApiException('Incomplete BTC prices', -1);
+    return _fiatMap(rates);
+  }
+
+  static Map<String, double> btcPricesFromBlockchain(Object? data) {
+    if (data is! Map) throw ApiException('Incomplete BTC prices', -1);
+    final flat = <String, Object?>{};
+    data.forEach((key, value) {
+      if (value is Map && value['last'] != null) flat[key.toString()] = value['last'];
+    });
+    return _fiatMap(flat);
+  }
+
+  static Map<String, double> _fiatMap(Map raw) {
+    final prices = <String, double>{};
+    for (final code in priceFiats) {
+      final value = _asPositivePrice(raw[code] ?? raw[code.toUpperCase()]);
+      if (value == null) throw ApiException('Incomplete BTC prices', -1);
+      prices[code] = value;
+    }
+    return prices;
+  }
+
+  static double? _asPositivePrice(Object? value) {
+    final number = value is num
+        ? value.toDouble()
+        : value is String
+            ? double.tryParse(value)
+            : null;
+    if (number == null || !number.isFinite || number <= 0) return null;
+    return number;
   }
 
   static Future<List<PriceDataPoint>> fetchHistoricalData(String currency, int days) async {

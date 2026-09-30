@@ -21,7 +21,7 @@ CSV and PDF are not encrypted app restores. They are plaintext reports/spreadshe
 An optional app PIN locks the App on this device. It does not encrypt exported files and is not a substitute for locking or encrypting the phone.
 
 ## Data Accuracy
-We strive to provide accurate price data via CoinGecko API, but we do not guarantee its accuracy, completeness, or timeliness. Prices may be delayed or incorrect. Use at your own risk.
+We strive to provide accurate price data via CoinGecko, with Coinbase and Blockchain.com as backups, but we do not guarantee its accuracy, completeness, or timeliness. Prices may be delayed or incorrect. Use at your own risk.
 
 ## Limitation of Liability
 To the fullest extent permitted by law, dev21Ltd and its contributors shall not be liable for any direct, indirect, incidental, special, consequential, or punitive damages arising out of your use of the App.

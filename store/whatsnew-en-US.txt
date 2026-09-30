@@ -1,5 +1,5 @@
-SatStack 1.0.6
+SatStack 1.0.7
 
-• ROI by time range (1M–Max, through today)
-• Faster PIN unlock
-• Full-screen chart and pinch-zoom
+• Live price, with a backup when the first source is busy
+• Full-screen chart for every range (1M–Max)
+• ROI for each range, from that start through today

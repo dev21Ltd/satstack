@@ -27,7 +27,7 @@ SatStack collects **ZERO** personal data. Your portfolio stays on your device.
 - CSV and PDF reports are **plaintext**. Anyone with those files can read your trades. Treat them like financial documents.
 
 ## External Services
-CoinGecko HTTPS is used only for Bitcoin prices. No portfolio data is sent. Android connections to `api.coingecko.com` check the TLS certificate (leaf pin plus Google Trust Services WE1 issuer).
+Bitcoin prices are requested over HTTPS from CoinGecko, then Coinbase, then Blockchain.com if the earlier source does not answer. No portfolio data is sent. Android checks the TLS certificate for `api.coingecko.com`, `api.coinbase.com`, and `blockchain.info`.
 
 ## Your Rights
 - Export data anytime (JSON, CSV, or PDF)
