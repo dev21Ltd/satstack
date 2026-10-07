@@ -1,9 +1,11 @@
 # Changelog
 
-## 1.0.7 (2026-09-30)
+## 1.0.7 (2026-10-07)
 
-Android version code **14**.
+Android version code **15**. Version code 14 is already on Play.
 
+- Chart shows the highest, lowest, and current stack value for the selected range.
+- Bottom of the chart shows one date per month or year, without a repeated year.
 - Live Bitcoin price tries CoinGecko once, then Coinbase, then Blockchain.com. The same seven currencies come back from whichever source answers.
 - Full-screen chart remains. Pinch-zoom is removed.
 
