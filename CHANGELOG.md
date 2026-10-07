@@ -2,7 +2,7 @@
 
 ## 1.0.7 (2026-09-30)
 
-Android version code **13**.
+Android version code **14**.
 
 - Live Bitcoin price tries CoinGecko once, then Coinbase, then Blockchain.com. The same seven currencies come back from whichever source answers.
 - Full-screen chart remains. Pinch-zoom is removed.

@@ -26,6 +26,422 @@ enum PortfolioTimeRange {
 /// `false` = original axes: rotated trade dates and a purchase/sale dot on each trade day.
 const bool kUseNiceChartAxes = false;
 
+/// Right-hand scale for one time range. [maxY] is just above the highest
+/// value in that range, so the peak sits at the top instead of under a
+/// coarser round number.
+class ChartYAxis {
+  final double minY;
+  final double maxY;
+  final double interval;
+  const ChartYAxis(this.minY, this.maxY, this.interval);
+}
+
+double nicePriceStep(double minPrice, double maxPrice) {
+  final priceRange = maxPrice - minPrice;
+  if (!priceRange.isFinite || priceRange <= 0) return 1000;
+  final roughInterval = priceRange / 5;
+  if (!roughInterval.isFinite || roughInterval <= 0) return 1000;
+  final logVal = math.log(roughInterval) / math.ln10;
+  if (!logVal.isFinite) return 1000;
+  final magnitude = math.pow(10, logVal.floor()).toDouble();
+  final remainder = roughInterval / magnitude;
+  if (remainder < 1.5) return magnitude;
+  if (remainder < 3) return 2 * magnitude;
+  if (remainder < 7) return 5 * magnitude;
+  return 10 * magnitude;
+}
+
+double finerPriceStep(double interval) {
+  if (!interval.isFinite || interval <= 0) return interval;
+  final magnitude = math.pow(10, (math.log(interval) / math.ln10).floor()).toDouble();
+  if (magnitude <= 0) return interval;
+  final units = interval / magnitude;
+  if (units > 5.01) return 5 * magnitude;
+  if (units > 2.01) return 2 * magnitude;
+  if (units > 1.01) return magnitude;
+  final half = magnitude / 2;
+  return half > 0 && half < interval ? half : interval;
+}
+
+ChartYAxis chartYAxis(double rawMin, double rawMax) {
+  var dataMin = rawMin.isFinite ? rawMin : 0.0;
+  var dataMax = rawMax.isFinite ? rawMax : 0.0;
+  if (dataMax <= dataMin) dataMax = dataMin + 1;
+  final neverNegative = dataMin >= 0;
+  final floorAtZero = neverNegative && dataMin <= dataMax * 0.15;
+  final baseMin = floorAtZero ? 0.0 : dataMin;
+  var span = dataMax - baseMin;
+  if (!span.isFinite || span <= 0) span = 1;
+  final paddedMax = dataMax + span * 0.08;
+
+  var interval = nicePriceStep(baseMin, paddedMax);
+  if (!interval.isFinite || interval <= 0) interval = 1000;
+
+  double ceilTo(double value, double step) {
+    if (step <= 0) return value;
+    final snapped = (value / step).ceil() * step;
+    return snapped + step * 1e-9 < value ? value : snapped;
+  }
+
+  var maxY = ceilTo(paddedMax, interval);
+  var guard = 0;
+  while (guard++ < 8 && (maxY - dataMax) / span > 0.18) {
+    final finer = finerPriceStep(interval);
+    if (finer >= interval - 1e-9) break;
+    interval = finer;
+    maxY = ceilTo(paddedMax, interval);
+  }
+
+  var minY = floorAtZero ? 0.0 : (dataMin / interval).floor() * interval;
+  if (neverNegative && minY < 0) minY = 0;
+  if (minY > dataMin) minY = dataMin;
+  if (maxY <= minY) maxY = minY + interval;
+  if (maxY < dataMax) maxY = paddedMax;
+
+  guard = 0;
+  while (guard++ < 6 && (maxY - minY) / interval < 3) {
+    final finer = finerPriceStep(interval);
+    if (finer >= interval - 1e-9) break;
+    interval = finer;
+  }
+  return ChartYAxis(minY, maxY, interval);
+}
+
+/// Highest and lowest stack value in the selected range. These are the
+/// portfolio line's own ends, not the round scale above and below them.
+class StackRangeMarks {
+  final double low;
+  final double high;
+  const StackRangeMarks(this.low, this.high);
+}
+
+const double kAxisLabelHeight = 14;
+
+StackRangeMarks? stackRangeMarks(Iterable<double> stackValues) {
+  double? low;
+  double? high;
+  for (final value in stackValues) {
+    if (!value.isFinite) continue;
+    low = low == null ? value : math.min(low, value);
+    high = high == null ? value : math.max(high, value);
+  }
+  if (low == null || high == null) return null;
+  return StackRangeMarks(low, high);
+}
+
+String formatChartAxisPrice(double price, String symbol) {
+  final absPrice = price.abs();
+  final sign = price < 0 ? '-' : '';
+  if (absPrice >= 1000000) {
+    return '$sign$symbol${(absPrice / 1000000).toStringAsFixed(1)}M';
+  }
+  if (absPrice >= 1000) {
+    return '$sign$symbol${(absPrice / 1000).toStringAsFixed(1)}K';
+  }
+  if (absPrice >= 1) {
+    return '$sign$symbol${absPrice.toStringAsFixed(0)}';
+  }
+  return '$sign$symbol${absPrice.toStringAsFixed(2)}';
+}
+
+double axisValuePixel({
+  required double value,
+  required double minY,
+  required double maxY,
+  required double axisSize,
+}) {
+  if (!axisSize.isFinite || axisSize <= 0) return 0;
+  final span = maxY - minY;
+  if (!span.isFinite || span <= 0) return 0;
+  final portion = ((value - minY) / span).clamp(0.0, 1.0);
+  return (1 - portion) * axisSize;
+}
+
+bool axisLabelsCollide({
+  required double a,
+  required double b,
+  required double minY,
+  required double maxY,
+  required double axisSize,
+  double labelHeight = kAxisLabelHeight,
+}) {
+  if (!axisSize.isFinite || axisSize <= 0) return false;
+  final gap = axisValuePixel(
+        value: a,
+        minY: minY,
+        maxY: maxY,
+        axisSize: axisSize,
+      ) -
+      axisValuePixel(
+        value: b,
+        minY: minY,
+        maxY: maxY,
+        axisSize: axisSize,
+      );
+  return gap.abs() < labelHeight;
+}
+
+bool _sameDisplayedAxisPrice(double a, double b) =>
+    formatChartAxisPrice(a, '') == formatChartAxisPrice(b, '');
+
+/// The stack marks that have room for their own row. A flat range keeps the
+/// high, because the low would sit on the same row. Today's stack is included
+/// only when it sits strictly between those two and has its own row.
+List<double> visibleStackMarks({
+  required StackRangeMarks marks,
+  required double minY,
+  required double maxY,
+  required double axisSize,
+  double? current,
+}) {
+  final shown = <double>[marks.high];
+  final lowHasRoom = !axisLabelsCollide(
+    a: marks.low,
+    b: marks.high,
+    minY: minY,
+    maxY: maxY,
+    axisSize: axisSize,
+  );
+  if (lowHasRoom) shown.add(marks.low);
+  if (current == null || !current.isFinite) return shown;
+  if (current <= marks.low || current >= marks.high) return shown;
+  if (_sameDisplayedAxisPrice(current, marks.high) ||
+      _sameDisplayedAxisPrice(current, marks.low)) {
+    return shown;
+  }
+  final crowded = shown.any(
+    (mark) =>
+        _sameDisplayedAxisPrice(current, mark) ||
+        axisLabelsCollide(
+          a: current,
+          b: mark,
+          minY: minY,
+          maxY: maxY,
+          axisSize: axisSize,
+        ),
+  );
+  if (!crowded) shown.add(current);
+  return shown;
+}
+
+bool chartGridLabelCoveredByStackMark({
+  required double gridValue,
+  required StackRangeMarks marks,
+  required double minY,
+  required double maxY,
+  required double axisSize,
+  double? current,
+}) {
+  for (final mark in visibleStackMarks(
+    marks: marks,
+    minY: minY,
+    maxY: maxY,
+    axisSize: axisSize,
+    current: current,
+  )) {
+    if (axisLabelsCollide(
+      a: gridValue,
+      b: mark,
+      minY: minY,
+      maxY: maxY,
+      axisSize: axisSize,
+    )) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/// How the bottom of one time range is labelled.
+enum ChartBottomScale { days, months, years }
+
+ChartBottomScale chartBottomScale(PortfolioTimeRange range) {
+  switch (range) {
+    case PortfolioTimeRange.MONTH_1:
+      return ChartBottomScale.days;
+    case PortfolioTimeRange.MONTH_6:
+    case PortfolioTimeRange.YEAR_1:
+      return ChartBottomScale.months;
+    case PortfolioTimeRange.YEAR_2:
+    case PortfolioTimeRange.YEAR_3:
+    case PortfolioTimeRange.YEAR_4:
+    case PortfolioTimeRange.YEAR_5:
+    case PortfolioTimeRange.YEAR_10:
+    case PortfolioTimeRange.MAX:
+      return ChartBottomScale.years;
+  }
+}
+
+double _uprightLabelWidth(String label) => label.length * 5.6 + 4;
+
+/// One calendar step per label. The opening point stays at the left and today
+/// stays at the right. Each year or month in between sits on the trade nearest
+/// an even step, so a busy year is labelled in the middle of its own trades.
+/// A one-month range uses the start, the middle, and today.
+List<int> chartCalendarTickIndices(List<DateTime> dates, ChartBottomScale scale) {
+  if (dates.isEmpty) return const [];
+  final last = dates.length - 1;
+  if (dates.length == 1) return const [0];
+  if (scale == ChartBottomScale.days) {
+    final span = dates.last.difference(dates.first).inMicroseconds;
+    final target = dates.first.add(Duration(microseconds: span ~/ 2));
+    var mid = 0;
+    var best = dates.first.difference(target).inMicroseconds.abs();
+    for (var i = 1; i < dates.length; i++) {
+      final gap = dates[i].difference(target).inMicroseconds.abs();
+      if (gap < best) {
+        best = gap;
+        mid = i;
+      }
+    }
+    final ticks = <int>[0];
+    if (mid != 0 && mid != last) ticks.add(mid);
+    ticks.add(last);
+    return ticks;
+  }
+
+  final groups = <List<int>>[];
+  String? bucket;
+  for (var i = 0; i < dates.length; i++) {
+    final date = dates[i];
+    final key = scale == ChartBottomScale.years
+        ? '${date.year}'
+        : '${date.year}-${date.month}';
+    if (key != bucket) {
+      groups.add(<int>[]);
+      bucket = key;
+    }
+    groups.last.add(i);
+  }
+
+  final count = groups.length;
+  final ticks = <int>[];
+  for (var groupIndex = 0; groupIndex < count; groupIndex++) {
+    final group = groups[groupIndex];
+    if (groupIndex == 0) {
+      ticks.add(group.first);
+      continue;
+    }
+    if (groupIndex == count - 1) {
+      ticks.add(last);
+      continue;
+    }
+    final target = groupIndex / (count - 1) * last;
+    var best = group.first;
+    var bestDistance = (best - target).abs();
+    for (final index in group) {
+      final distance = (index - target).abs();
+      if (distance < bestDistance) {
+        best = index;
+        bestDistance = distance;
+      }
+    }
+    ticks.add(best);
+  }
+  return ticks;
+}
+
+double _labelCenter({
+  required int index,
+  required int pointCount,
+  required double axisWidth,
+  required String label,
+}) {
+  if (pointCount <= 1 || axisWidth <= 0) return 0;
+  final half = _uprightLabelWidth(label) / 2 + 2;
+  if (axisWidth <= half * 2) return axisWidth / 2;
+  final raw = index / (pointCount - 1) * axisWidth;
+  return raw.clamp(half, axisWidth - half);
+}
+
+bool _calendarPairFits({
+  required int earlier,
+  required int later,
+  required int pointCount,
+  required double axisWidth,
+  required String Function(int index) labelAt,
+}) {
+  final earlierLabel = labelAt(earlier);
+  final laterLabel = labelAt(later);
+  final gap = _labelCenter(
+        index: later,
+        pointCount: pointCount,
+        axisWidth: axisWidth,
+        label: laterLabel,
+      ) -
+      _labelCenter(
+        index: earlier,
+        pointCount: pointCount,
+        axisWidth: axisWidth,
+        label: earlierLabel,
+      );
+  return gap >= (_uprightLabelWidth(earlierLabel) + _uprightLabelWidth(laterLabel)) / 2;
+}
+
+List<int> _collapseSameBottomLabel(
+  List<int> ticks,
+  String Function(int index) labelAt,
+) {
+  final kept = <int>[];
+  for (final index in ticks) {
+    if (kept.isNotEmpty && labelAt(kept.last) == labelAt(index)) {
+      kept[kept.length - 1] = index;
+    } else {
+      kept.add(index);
+    }
+  }
+  return kept;
+}
+
+/// Calendar labels that fit the axis. The opening and closing dates stay.
+/// A year or month in between is dropped only when its text would cover a
+/// neighbour. The same text is never drawn twice.
+List<int> visibleChartCalendarTicks({
+  required List<DateTime> dates,
+  required ChartBottomScale scale,
+  required double axisWidth,
+  required String Function(int index) labelAt,
+}) {
+  final ticks = _collapseSameBottomLabel(
+    chartCalendarTickIndices(dates, scale),
+    labelAt,
+  );
+  if (ticks.length <= 1 || axisWidth <= 0 || !axisWidth.isFinite) return ticks;
+
+  final count = ticks.length;
+  final bestCount = List<int>.filled(count, -1);
+  final parent = List<int>.filled(count, -1);
+  bestCount[0] = 1;
+  for (var i = 1; i < count; i++) {
+    for (var j = 0; j < i; j++) {
+      if (bestCount[j] < 0) continue;
+      if (!_calendarPairFits(
+        earlier: ticks[j],
+        later: ticks[i],
+        pointCount: dates.length,
+        axisWidth: axisWidth,
+        labelAt: labelAt,
+      )) {
+        continue;
+      }
+      final next = bestCount[j] + 1;
+      if (next > bestCount[i]) {
+        bestCount[i] = next;
+        parent[i] = j;
+      }
+    }
+  }
+  if (bestCount[count - 1] < 0) return [ticks.last];
+
+  final chosen = <int>[];
+  var index = count - 1;
+  while (index >= 0) {
+    chosen.add(ticks[index]);
+    index = parent[index];
+  }
+  return chosen.reversed.toList();
+}
+
 class PortfolioChart extends StatefulWidget {
   final List<Purchase> purchases;
   final List<Sale> sales;
@@ -504,9 +920,15 @@ class _PortfolioChartState extends State<PortfolioChart>
     if (!_minValue.isFinite) _minValue = 0;
     if (!_maxValue.isFinite) _maxValue = 0;
 
+    final peak = _maxValue;
+    final axis = chartYAxis(_minValue, _maxValue);
+    _minValue = axis.minY;
+    _maxValue = axis.maxY;
+    _yInterval = axis.interval;
+    if (_maxValue < peak) _maxValue = peak;
+
     if (kUseNiceChartAxes) {
       try {
-        _applyNiceYRange();
         _xTicks = _dropDuplicateLabels(_timelineTickIndices());
         _rebuildTradeOverlays();
       } catch (e) {
@@ -522,47 +944,7 @@ class _PortfolioChartState extends State<PortfolioChart>
       }
       return;
     }
-
-    // Floor the axis at the real line start (can be negative). Pad only the top
-    // so the first $ label sits on the line instead of below it.
-    final dataMin = _minValue;
-    final dataMax = _maxValue;
-    final valueRange = dataMax - dataMin;
-    _minValue = dataMin;
-    if (valueRange > 0) {
-      _maxValue = dataMax + valueRange * 0.08;
-    } else {
-      final pad = math.max(dataMax.abs() * 0.1, 1.0);
-      _minValue = dataMin - pad;
-      _maxValue = dataMax + pad;
-    }
-    _yInterval = _getPriceInterval(_minValue, _maxValue);
     _xTicks = [];
-  }
-
-  void _applyNiceYRange() {
-    var dataMin = _minValue.isFinite ? _minValue : 0.0;
-    var dataMax = _maxValue.isFinite ? _maxValue : 0.0;
-    if (dataMax <= dataMin) dataMax = dataMin + 1;
-    final neverNegative = dataMin >= 0;
-    var span = dataMax - (neverNegative && dataMin <= dataMax * 0.15 ? 0 : dataMin);
-    if (!span.isFinite || span <= 0) span = 1;
-    _yInterval = _getPriceInterval(0, span);
-    if (!_yInterval.isFinite || _yInterval <= 0) _yInterval = 1000;
-
-    if (neverNegative && dataMin <= dataMax * 0.15) {
-      _minValue = 0;
-    } else {
-      _minValue = (dataMin / _yInterval).floor() * _yInterval;
-      if (neverNegative && _minValue < 0) _minValue = 0;
-    }
-    _maxValue = (dataMax / _yInterval).ceil() * _yInterval;
-    if (!_minValue.isFinite) _minValue = 0;
-    if (!_maxValue.isFinite) _maxValue = _minValue + _yInterval * 4;
-    if (_maxValue <= _minValue) _maxValue = _minValue + _yInterval * 4;
-    while (_yInterval > 0 && (_maxValue - _minValue) / _yInterval < 3) {
-      _maxValue += _yInterval;
-    }
   }
 
   /// Calendar labels only (not one label per trade). First/last always kept.
@@ -2084,9 +2466,7 @@ class _PortfolioChartState extends State<PortfolioChart>
         show: true,
         drawVerticalLine: true,
         drawHorizontalLine: true,
-        horizontalInterval: kUseNiceChartAxes
-            ? _yInterval
-            : _getPriceInterval(_minValue, _maxValue),
+        horizontalInterval: _yInterval,
         verticalInterval: kUseNiceChartAxes ? 1 : _getTimeInterval(),
         checkToShowVerticalLine: (value) {
           if (!kUseNiceChartAxes) return true;
@@ -2111,40 +2491,43 @@ class _PortfolioChartState extends State<PortfolioChart>
         bottomTitles: AxisTitles(
           sideTitles: SideTitles(
             showTitles: true,
-            interval: kUseNiceChartAxes ? 1 : _getTimeInterval(),
-            reservedSize: kUseNiceChartAxes ? 28 : 48,
+            interval: 1,
+            reservedSize: kUseNiceChartAxes ? 28 : 24,
             getTitlesWidget: (value, meta) {
               if (value < 0 || value >= _portfolioData.length) return const SizedBox();
               final index = value.round();
+              if ((value - index).abs() > 0.01) return const SizedBox();
               if (kUseNiceChartAxes && !_xTicks.contains(index)) {
                 return const SizedBox();
               }
-              if ((value - index).abs() > 0.01) return const SizedBox();
-              final date = _portfolioData[index].date;
-              final label = _formatChartDate(date);
+              if (!kUseNiceChartAxes &&
+                  !visibleChartCalendarTicks(
+                    dates: [for (final point in _portfolioData) point.date],
+                    scale: chartBottomScale(_selectedTimeRange),
+                    axisWidth: meta.parentAxisSize,
+                    labelAt: (i) => _formatChartDate(_portfolioData[i].date),
+                  ).contains(index)) {
+                return const SizedBox();
+              }
+              final label = _formatChartDate(_portfolioData[index].date);
+              final style = TextStyle(
+                fontSize: 10,
+                color: widget.isDarkMode ? Colors.white54 : Colors.black54,
+              );
               if (kUseNiceChartAxes) {
                 return Padding(
                   padding: const EdgeInsets.only(top: 6.0),
-                  child: Text(
-                    label,
-                    style: TextStyle(
-                        fontSize: 10,
-                        color: widget.isDarkMode ? Colors.white54 : Colors.black54),
-                  ),
+                  child: Text(label, style: style),
                 );
               }
-              return Padding(
-                padding: EdgeInsets.only(left: index == 0 ? 8 : 0, top: 16.0),
-                child: Transform.rotate(
-                  angle: -0.4,
-                  alignment: Alignment.topLeft,
-                  child: Text(
-                    label,
-                    style: TextStyle(
-                        fontSize: 9,
-                        color: widget.isDarkMode ? Colors.white54 : Colors.black54),
-                  ),
+              return SideTitleWidget(
+                axisSide: meta.axisSide,
+                space: 4,
+                fitInside: SideTitleFitInsideData.fromTitleMeta(
+                  meta,
+                  distanceFromEdge: 2,
                 ),
+                child: Text(label, style: style),
               );
             },
           ),
@@ -2153,62 +2536,76 @@ class _PortfolioChartState extends State<PortfolioChart>
         rightTitles: AxisTitles(
           sideTitles: SideTitles(
             showTitles: true,
-            interval: kUseNiceChartAxes
-                ? _yInterval
-                : _getPriceInterval(_minValue, _maxValue),
+            interval: _yInterval,
             reservedSize: kUseNiceChartAxes ? 44 : 55,
             getTitlesWidget: (value, meta) {
-              if (kUseNiceChartAxes) {
-                if (!_yInterval.isFinite || _yInterval <= 0) {
-                  return const SizedBox();
-                }
-                final ticksFromMin = ((value - _minValue) / _yInterval);
-                if (!ticksFromMin.isFinite) return const SizedBox();
-                if ((ticksFromMin - ticksFromMin.round()).abs() > 0.02) {
-                  return const SizedBox();
-                }
-              } else {
-                if (value < _minValue || value > _maxValue) {
-                  return const SizedBox();
-                }
-                final yStep = _getPriceInterval(_minValue, _maxValue);
-                if (yStep > 0) {
-                  final distMin = (value - _minValue).abs();
-                  final distMax = (value - _maxValue).abs();
-                  final isMin = distMin <= yStep * 0.08;
-                  final isMax = distMax <= yStep * 0.08;
-                  final onGridZero =
-                      ((value / yStep) - (value / yStep).round()).abs() < 0.08;
-                  final fromMin = (value - _minValue) / yStep;
-                  final onGridMin = (fromMin - fromMin.round()).abs() < 0.08;
-                  final onGrid = onGridZero || onGridMin;
-                  if (!isMin && !isMax && !onGrid) {
-                    return const SizedBox();
-                  }
-                  if (onGrid && !isMin && distMin < yStep * 0.18) {
-                    return const SizedBox();
-                  }
-                  // Drop the extra top $ so it does not sit on the last grid tick.
-                  if (isMax && !onGrid) {
-                    return const SizedBox();
-                  }
-                  if (onGrid && !isMax && distMax < yStep * 0.35) {
-                    return const SizedBox();
-                  }
-                }
+              if (!_yInterval.isFinite || _yInterval <= 0) {
+                return const SizedBox();
               }
-              return Padding(
-                padding: const EdgeInsets.only(left: 6),
-                child: Text(
-                  _formatPriceForAxis(value, widget.currency),
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: widget.isDarkMode ? Colors.white54 : Colors.black54,
-                    fontWeight: FontWeight.w500,
-                  ),
-                  textAlign: TextAlign.left,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+              if (value < _minValue - _yInterval * 0.01 ||
+                  value > _maxValue + _yInterval * 0.01) {
+                return const SizedBox();
+              }
+              final fromMin = (value - _minValue) / _yInterval;
+              if (!fromMin.isFinite) return const SizedBox();
+              final onGrid = (fromMin - fromMin.round()).abs() < 0.08;
+              final isCeiling = (_maxValue - value).abs() <= _yInterval * 0.08;
+              if (!onGrid && !isCeiling) return const SizedBox();
+              final stackValues = [
+                for (final point in _portfolioData) point.portfolioValue,
+              ];
+              final marks = kUseNiceChartAxes ? null : stackRangeMarks(stackValues);
+              final currentStack =
+                  stackValues.isEmpty ? null : stackValues.last;
+              final axisSize = meta.parentAxisSize;
+              final covered = marks != null &&
+                  chartGridLabelCoveredByStackMark(
+                    gridValue: value,
+                    marks: marks,
+                    minY: meta.min,
+                    maxY: meta.max,
+                    axisSize: axisSize,
+                    current: currentStack,
+                  );
+              final isFloor = (value - meta.min).abs() <=
+                  math.max(meta.appliedInterval, _yInterval) * 0.02;
+              if (!isFloor || marks == null || !axisSize.isFinite || axisSize <= 0) {
+                if (covered) return const SizedBox();
+                return _rightAxisPrice(value, highlight: false);
+              }
+              final shown = visibleStackMarks(
+                marks: marks,
+                minY: meta.min,
+                maxY: meta.max,
+                axisSize: axisSize,
+                current: currentStack,
+              );
+              return SizedBox(
+                width: double.infinity,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  alignment: Alignment.centerLeft,
+                  children: [
+                    if (!covered) _rightAxisPrice(value, highlight: false),
+                    for (final mark in shown)
+                      Transform.translate(
+                        offset: Offset(
+                          0,
+                          axisValuePixel(
+                                value: mark,
+                                minY: meta.min,
+                                maxY: meta.max,
+                                axisSize: axisSize,
+                              ) -
+                              meta.axisPosition,
+                        ),
+                        child: _rightAxisPrice(
+                          mark,
+                          highlight: true,
+                          semanticsLabel: _stackMarkLabel(mark, marks),
+                        ),
+                      ),
+                  ],
                 ),
               );
             },
@@ -2578,22 +2975,10 @@ class _PortfolioChartState extends State<PortfolioChart>
   }
 
   double _getPriceInterval(double minPrice, double maxPrice) {
-    final priceRange = maxPrice - minPrice;
-    if (!priceRange.isFinite || priceRange <= 0) return 1000;
-    final double roughInterval = priceRange / 5;
-    if (!roughInterval.isFinite || roughInterval <= 0) return 1000;
-    final logVal = math.log(roughInterval) / math.ln10;
-    if (!logVal.isFinite) return 1000;
-    final double magnitude = math.pow(10, logVal.floor()).toDouble();
-    final double remainder = roughInterval / magnitude;
-    if (remainder < 1.5) return 1 * magnitude;
-    else if (remainder < 3) return 2 * magnitude;
-    else if (remainder < 7) return 5 * magnitude;
-    else return 10 * magnitude;
+    return nicePriceStep(minPrice, maxPrice);
   }
 
   String _formatChartDate(DateTime date) {
-    final dataLength = _portfolioData.length;
     if (_useYearLabels) {
       return DateFormat('yyyy').format(date);
     }
@@ -2612,11 +2997,12 @@ class _PortfolioChartState extends State<PortfolioChart>
       case PortfolioTimeRange.MONTH_1:
         return DateFormat('d MMM').format(date);
       case PortfolioTimeRange.MONTH_6:
-        return DateFormat('MMM').format(date);
       case PortfolioTimeRange.YEAR_1:
-        return dataLength > 20
+        final spansYears = _portfolioData.length > 1 &&
+            _portfolioData.first.date.year != _portfolioData.last.date.year;
+        return spansYears
             ? DateFormat('MMM yy').format(date)
-            : DateFormat('MMM yyyy').format(date);
+            : DateFormat('MMM').format(date);
       default:
         return DateFormat('yyyy').format(date);
     }
@@ -2644,14 +3030,43 @@ class _PortfolioChartState extends State<PortfolioChart>
       if (absPrice >= 1) return '$sign$symbol${absPrice.toStringAsFixed(0)}';
       return '$sign$symbol${absPrice.toStringAsFixed(2)}';
     }
-    if (absPrice >= 1000000)
-      return '$sign$symbol${(absPrice / 1000000).toStringAsFixed(1)}M';
-    else if (absPrice >= 1000)
-      return '$sign$symbol${(absPrice / 1000).toStringAsFixed(1)}K';
-    else if (absPrice >= 1)
-      return '$sign$symbol${absPrice.toStringAsFixed(0)}';
-    else
-      return '$sign$symbol${absPrice.toStringAsFixed(2)}';
+    return formatChartAxisPrice(price, symbol);
+  }
+
+  String _stackMarkLabel(double mark, StackRangeMarks marks) {
+    final text = _formatPriceForAxis(mark, widget.currency);
+    if (mark == marks.high) return 'Highest stack in this range $text';
+    if (mark == marks.low) return 'Lowest stack in this range $text';
+    return 'Current stack $text';
+  }
+
+  Widget _rightAxisPrice(
+    double price, {
+    required bool highlight,
+    String? semanticsLabel,
+  }) {
+    final child = Padding(
+      padding: const EdgeInsets.only(left: 6),
+      child: Text(
+        _formatPriceForAxis(price, widget.currency),
+        style: TextStyle(
+          fontSize: 10,
+          color: highlight
+              ? (widget.isDarkMode ? Colors.white : Colors.black)
+              : (widget.isDarkMode ? Colors.white54 : Colors.black54),
+          fontWeight: highlight ? FontWeight.w700 : FontWeight.w500,
+        ),
+        textAlign: TextAlign.left,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+    );
+    if (semanticsLabel == null) return child;
+    return Semantics(
+      container: true,
+      label: semanticsLabel,
+      child: ExcludeSemantics(child: child),
+    );
   }
 
   String _trimAxisDecimal(double value) {
