@@ -4,6 +4,11 @@
 
 SatStack is an open source, privacy-focused Bitcoin portfolio tracker. All data stays on your device - no accounts, no tracking, no cloud storage.
 
+## What's new in 1.0.8
+
+- Chart update
+- More accurate stack value for every range, from 1 month to Max
+
 ## What's new in 1.0.7
 
 - Live price, with a backup when the first source is busy

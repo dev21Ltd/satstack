@@ -144,6 +144,91 @@ String formatChartAxisPrice(double price, String symbol) {
   return '$sign$symbol${absPrice.toStringAsFixed(2)}';
 }
 
+/// What the stack was worth on one day. Today keeps the live portfolio value.
+/// Any other day is the coins held times that day's Bitcoin price. When that
+/// day's price is missing, [liveBtcPrice] stands in until history is saved.
+double markToMarketStack({
+  required double btcHeld,
+  required bool isToday,
+  required double liveValue,
+  required double? dailyPrice,
+  required double liveBtcPrice,
+}) {
+  if (isToday) return liveValue;
+  if (btcHeld <= 0) return 0;
+  final price =
+      (dailyPrice != null && dailyPrice > 0) ? dailyPrice : liveBtcPrice;
+  if (price <= 0) return 0;
+  return btcHeld * price;
+}
+
+/// The day in the range when the stack was worth the least.
+class MarketStackLow {
+  final DateTime day;
+  final double worth;
+  final double btcHeld;
+  final double invested;
+  const MarketStackLow({
+    required this.day,
+    required this.worth,
+    required this.btcHeld,
+    required this.invested,
+  });
+}
+
+MarketStackLow lowestMarketStackDay({
+  required DateTime start,
+  required DateTime now,
+  required List<Purchase> purchases,
+  required List<Sale> sales,
+  required double liveValue,
+  required double liveBtcPrice,
+  required double? Function(DateTime day)? priceOn,
+  required double Function(Purchase purchase) investedAmount,
+}) {
+  final buys = List<Purchase>.from(purchases)
+    ..sort((a, b) => a.date.compareTo(b.date));
+  final sells = List<Sale>.from(sales)
+    ..sort((a, b) => a.date.compareTo(b.date));
+  var btc = 0.0;
+  var invested = 0.0;
+  var buyIndex = 0;
+  var sellIndex = 0;
+  var day = DateTime(start.year, start.month, start.day);
+  final end = DateTime(now.year, now.month, now.day);
+  MarketStackLow? lowest;
+  while (!day.isAfter(end)) {
+    final next = day.add(const Duration(days: 1));
+    while (buyIndex < buys.length && buys[buyIndex].date.isBefore(next)) {
+      btc += buys[buyIndex].amountBTC;
+      invested += investedAmount(buys[buyIndex]);
+      buyIndex++;
+    }
+    while (sellIndex < sells.length && sells[sellIndex].date.isBefore(next)) {
+      btc -= sells[sellIndex].amountBTC;
+      sellIndex++;
+    }
+    final worth = markToMarketStack(
+      btcHeld: btc,
+      isToday: day == end,
+      liveValue: liveValue,
+      dailyPrice: priceOn?.call(day),
+      liveBtcPrice: liveBtcPrice,
+    );
+    if (lowest == null || worth < lowest.worth) {
+      lowest = MarketStackLow(
+        day: day,
+        worth: worth,
+        btcHeld: btc,
+        invested: invested,
+      );
+    }
+    day = next;
+  }
+  return lowest ??
+      MarketStackLow(day: end, worth: liveValue, btcHeld: 0, invested: 0);
+}
+
 double axisValuePixel({
   required double value,
   required double minY,
@@ -460,6 +545,8 @@ class PortfolioChart extends StatefulWidget {
   final Map<Currency, double> btcPrices;
   final bool holdingsHidden;
   final Map<Currency, double> Function(DateTime date)? pricesOnDate;
+  final double? Function(DateTime date)? marketPriceOn;
+  final int marketPriceRevision;
   final bool expanded;
 
   const PortfolioChart({
@@ -481,6 +568,8 @@ class PortfolioChart extends StatefulWidget {
     required this.btcPrices,
     required this.holdingsHidden,
     this.pricesOnDate,
+    this.marketPriceOn,
+    this.marketPriceRevision = 0,
     this.expanded = false,
   }) : super(key: key);
 
@@ -534,7 +623,8 @@ class _PortfolioChartState extends State<PortfolioChart>
         oldWidget.portfolioValue != widget.portfolioValue ||
         oldWidget.totalInvestment != widget.totalInvestment ||
         oldWidget.profitLoss != widget.profitLoss ||
-        oldWidget.holdingsHidden != widget.holdingsHidden) {
+        oldWidget.holdingsHidden != widget.holdingsHidden ||
+        oldWidget.marketPriceRevision != widget.marketPriceRevision) {
       _calculatePortfolioData(notify: false);
       if (_isInitialized) {
         _animationController.reset();
@@ -577,6 +667,8 @@ class _PortfolioChartState extends State<PortfolioChart>
           btcPrices: widget.btcPrices,
           holdingsHidden: widget.holdingsHidden,
           pricesOnDate: widget.pricesOnDate,
+          marketPriceOn: widget.marketPriceOn,
+          marketPriceRevision: widget.marketPriceRevision,
           expanded: true,
         ),
       ),
@@ -692,7 +784,38 @@ class _PortfolioChartState extends State<PortfolioChart>
       ..sort((a, b) => a.date.compareTo(b.date));
     // ----------------------------------------------------------
 
+    _includeLowestMarketDay(startDate, now);
     _calculateMinMaxValues();
+  }
+
+  void _includeLowestMarketDay(DateTime startDate, DateTime now) {
+    final low = lowestMarketStackDay(
+      start: startDate,
+      now: now,
+      purchases: widget.purchases,
+      sales: widget.sales,
+      liveValue: widget.portfolioValue,
+      liveBtcPrice: widget.currentBtcPrice,
+      priceOn: widget.marketPriceOn,
+      investedAmount: (purchase) => _convertCurrency(
+        purchase.totalCashSpent,
+        purchase.cashCurrency,
+        widget.currency,
+        purchase.date,
+      ),
+    );
+    final alreadyThere = _portfolioData.any((point) =>
+        point.date.year == low.day.year &&
+        point.date.month == low.day.month &&
+        point.date.day == low.day.day);
+    if (alreadyThere) return;
+    _portfolioData.add(PortfolioDataPoint(
+      date: low.day,
+      portfolioValue: low.worth,
+      investmentValue: low.invested,
+      btcAmount: low.btcHeld,
+    ));
+    _portfolioData.sort((a, b) => a.date.compareTo(b.date));
   }
 
   DateTime _calculateStartDate(DateTime firstPurchaseDate, DateTime now) {
@@ -831,71 +954,23 @@ class _PortfolioChartState extends State<PortfolioChart>
         currentSaleIndex++;
       }
 
-      double portfolioValue;
-
-      if (date.year == now.year &&
+      final isToday = date.year == now.year &&
           date.month == now.month &&
-          date.day == now.day) {
-        // For current date, use actual portfolio value
+          date.day == now.day;
+      final double portfolioValue;
+      if (isToday) {
         portfolioValue = widget.portfolioValue;
       } else if (hasTransactionToday && runningBTC > 0) {
-        // For dates with transactions, use the transaction price
         portfolioValue = runningBTC * lastKnownPrice;
-      } else if (lastKnownPrice > 0 && runningBTC > 0) {
-        // For dates without transactions, use the most recent transaction price
-        portfolioValue = runningBTC * lastKnownPrice;
-      } else if (runningBTC > 0) {
-        // No transaction price yet, calculate weighted average from purchases
-        double totalWeightedPrice = 0;
-        double totalBTCForAvg = 0;
-
-        for (int i = 0; i < currentPurchaseIndex && i < sortedPurchases.length; i++) {
-          final purchase = sortedPurchases[i];
-          if (purchase.date.isBefore(date.add(Duration(days: 1)))) {
-            final convertedPrice = _convertCurrency(
-                purchase.pricePerBTC,
-                purchase.cashCurrency,
-                widget.currency);
-            totalWeightedPrice += convertedPrice * purchase.amountBTC;
-            totalBTCForAvg += purchase.amountBTC;
-          }
-        }
-
-        // Subtract BTC from sales for average calculation
-        for (int i = 0; i < currentSaleIndex && i < sortedSales.length; i++) {
-          final sale = sortedSales[i];
-          if (sale.date.isBefore(date.add(Duration(days: 1)))) {
-            // For sales, we need to remove BTC from the weighted average
-            // Using FIFO approach: remove oldest purchases first
-            double btcToRemove = sale.amountBTC;
-            int j = 0;
-
-            while (btcToRemove > 0 && j < sortedPurchases.length) {
-              final purchase = sortedPurchases[j];
-              if (purchase.date.isBefore(date.add(Duration(days: 1)))) {
-                double btcFromPurchase = purchase.amountBTC;
-                if (btcFromPurchase <= btcToRemove) {
-                  totalWeightedPrice -= _convertCurrency(purchase.pricePerBTC,
-                      purchase.cashCurrency, widget.currency) * btcFromPurchase;
-                  totalBTCForAvg -= btcFromPurchase;
-                  btcToRemove -= btcFromPurchase;
-                } else {
-                  totalWeightedPrice -= _convertCurrency(purchase.pricePerBTC,
-                      purchase.cashCurrency, widget.currency) * btcToRemove;
-                  totalBTCForAvg -= btcToRemove;
-                  btcToRemove = 0;
-                }
-              }
-              j++;
-            }
-          }
-        }
-
-        final avgPrice = totalBTCForAvg > 0 ? totalWeightedPrice / totalBTCForAvg : 0;
-        portfolioValue = runningBTC * avgPrice;
       } else {
-        // No BTC yet
-        portfolioValue = 0;
+        // A day with no trade, including the first day of the range.
+        portfolioValue = markToMarketStack(
+          btcHeld: runningBTC,
+          isToday: false,
+          liveValue: widget.portfolioValue,
+          dailyPrice: widget.marketPriceOn?.call(date),
+          liveBtcPrice: widget.currentBtcPrice,
+        );
       }
 
       _portfolioData.add(PortfolioDataPoint(

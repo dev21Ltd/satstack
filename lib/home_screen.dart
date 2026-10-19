@@ -541,7 +541,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
             onEditSale: (updatedSale) => appState.updateSale(updatedSale),
             onDeleteSale: (saleToDelete) => appState.deleteSale(saleToDelete.id),
             denomination: appState.denomination, btcPrices: appState.btcPrices, holdingsHidden: appState.holdingsHidden,
-            pricesOnDate: appState.pricesOnDate),
+            pricesOnDate: appState.pricesOnDate,
+            marketPriceOn: appState.marketPriceOn,
+            marketPriceRevision: appState.marketPriceRevision),
       ]))),
     );
   }

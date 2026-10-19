@@ -291,6 +291,34 @@ void main() {
     expect(find.text('${now.year - 10}'), findsOneWidget);
   });
 
+  test('the lowest day is the coins times that days bitcoin price', () {
+    final dip = DateTime(2026, 9, 29);
+    final low = lowestMarketStackDay(
+      start: DateTime(2026, 9, 19),
+      now: DateTime(2026, 10, 19),
+      purchases: [
+        Purchase(
+          id: 'a',
+          date: DateTime(2026, 8, 1),
+          amountBTC: 2,
+          pricePerBTC: 10000,
+          cashCurrency: Currency.USD,
+        ),
+      ],
+      sales: const [],
+      liveValue: 160000,
+      liveBtcPrice: 80000,
+      priceOn: (day) =>
+          day.year == dip.year && day.month == dip.month && day.day == dip.day
+              ? 40000
+              : 80000,
+      investedAmount: (purchase) => purchase.totalCashSpent,
+    );
+    expect(low.day, dip);
+    expect(low.worth, 80000);
+    expect(low.btcHeld, 2);
+  });
+
   testWidgets('a month shows the highest and lowest stack worth', (tester) async {
     tester.view.physicalSize = const Size(800, 1400);
     tester.view.devicePixelRatio = 1;
@@ -324,6 +352,13 @@ void main() {
           currentBtcPrice: 45000,
           currency: Currency.USD,
           portfolioValue: 90000,
+          marketPriceOn: (date) {
+            final dip = DateTime(now.year, now.month, now.day)
+                .subtract(const Duration(days: 20));
+            final day = DateTime(date.year, date.month, date.day);
+            if (day == DateTime(dip.year, dip.month, dip.day)) return 25000;
+            return 60000;
+          },
           totalInvestment: 70000,
           profitLoss: 20000,
           profitLossPercentage: 28,
@@ -345,11 +380,11 @@ void main() {
       findsOneWidget,
     );
     expect(
-      find.bySemanticsLabel('Lowest stack in this range \$20.0K'),
+      find.bySemanticsLabel('Lowest stack in this range \$25.0K'),
       findsOneWidget,
     );
     expect(find.bySemanticsLabel('Current stack \$90.0K'), findsOneWidget);
     expect(find.text('\$100.0K'), findsOneWidget);
-    expect(find.text('\$20.0K'), findsOneWidget);
+    expect(find.text('\$25.0K'), findsOneWidget);
   });
 }

@@ -151,6 +151,11 @@ class AppState with ChangeNotifier {
     return _historicalFx.pricesOn(date, _btcPrices);
   }
 
+  double? marketPriceOn(DateTime date) =>
+      _historicalFx.priceNear(date, _selectedCurrency);
+
+  int get marketPriceRevision => _historicalFx.revision;
+
   Future<void> bootstrap() async {
     if (_bootstrapped) {
       await reloadAllData();
@@ -260,7 +265,7 @@ class AppState with ChangeNotifier {
       _restoreCachedPricesIfNeeded();
       await fetchBtcPrices();
       await fetchHistoricalData();
-      unawaited(_historicalFx.refreshFromNetwork().then((_) {
+      unawaited(_historicalFx.refreshFromNetwork(onUpdated: notifyListeners).then((_) {
         notifyListeners();
       }));
       _isLoading = false;

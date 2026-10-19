@@ -198,6 +198,39 @@ class ApiService {
     return number;
   }
 
+  /// Coinbase `period=all` is a sparse BTC history in [currency], newest first.
+  /// About every two weeks, back to 2014. One attempt.
+  static Future<List<PriceDataPoint>> fetchCoinbaseHistory(String currency) async {
+    final response = await _get(
+      Uri.parse(
+        'https://api.coinbase.com/v2/prices/BTC-${currency.toUpperCase()}/historic?period=all',
+      ),
+      timeout: const Duration(seconds: 20),
+    );
+    return pricePointsFromCoinbaseHistoric(_decodePriceJson(response));
+  }
+
+  static List<PriceDataPoint> pricePointsFromCoinbaseHistoric(Object? data) {
+    if (data is! Map) throw ApiException('Incomplete BTC history', -1);
+    final payload = data['data'];
+    if (payload is! Map) throw ApiException('Incomplete BTC history', -1);
+    final prices = payload['prices'];
+    if (prices is! List) throw ApiException('Incomplete BTC history', -1);
+    final points = <PriceDataPoint>[];
+    for (final row in prices) {
+      if (row is! Map) continue;
+      final price = _asPositivePrice(row['price']);
+      final seconds = int.tryParse('${row['time']}');
+      if (price == null || seconds == null) continue;
+      points.add(PriceDataPoint(
+        DateTime.fromMillisecondsSinceEpoch(seconds * 1000, isUtc: true),
+        price,
+      ));
+    }
+    if (points.isEmpty) throw ApiException('Incomplete BTC history', -1);
+    return points;
+  }
+
   static Future<List<PriceDataPoint>> fetchHistoricalData(String currency, int days) async {
     try {
       return await _withRetry(() async {

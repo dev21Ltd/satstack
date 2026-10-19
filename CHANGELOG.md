@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.8 (2026-10-19)
+
+Android version code **16**.
+
+- Chart update
+- More accurate stack value for every range, from 1 month to Max
+
 ## 1.0.7 (2026-10-07)
 
 Android version code **15**. Version code 14 is already on Play.

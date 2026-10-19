@@ -54,6 +54,23 @@ void main() {
     expect(prices.length, 7);
   });
 
+  test('Coinbase history keeps each dated price', () {
+    final points = ApiService.pricePointsFromCoinbaseHistoric({
+      'data': {
+        'currency': 'BTC',
+        'prices': [
+          {'price': '81991.715', 'time': '1792368000'},
+          {'price': '1017.12', 'time': '1388966400'},
+        ],
+      },
+    });
+    expect(points, hasLength(2));
+    expect(points.first.price, closeTo(81991.715, 0.001));
+    expect(points.first.date.toUtc(), DateTime.utc(2026, 10, 19));
+    expect(points.last.price, closeTo(1017.12, 0.001));
+    expect(points.last.date.toUtc(), DateTime.utc(2014, 1, 6));
+  });
+
   test('a provider missing a currency is rejected', () {
     expect(
       () => ApiService.btcPricesFromCoinbase({
