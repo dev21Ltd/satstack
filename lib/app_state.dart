@@ -27,6 +27,7 @@ class AppState with ChangeNotifier {
   List<Sale> _sales = [];
   List<PriceDataPoint> _priceHistory = [];
   bool _isRefreshing = false;
+  bool _savedPriceRefreshInFlight = false;
   bool _isLoading = true;
   DateTime _selectedDate = DateTime.now();
   DateTime? _lastUpdated;
@@ -265,9 +266,7 @@ class AppState with ChangeNotifier {
       _restoreCachedPricesIfNeeded();
       await fetchBtcPrices();
       await fetchHistoricalData();
-      unawaited(_historicalFx.refreshFromNetwork(onUpdated: notifyListeners).then((_) {
-        notifyListeners();
-      }));
+      refreshSavedPrices();
       _isLoading = false;
       print('Initial data load completed');
       notifyListeners();
@@ -445,20 +444,25 @@ class AppState with ChangeNotifier {
 
   // MODIFIED: Now async and throws on failure
   Future<void> addSale(double amount, double manualPrice) async {
+    if (amount > totalBTC) {
+      _lastError = 'Not enough BTC to sell';
+      notifyListeners();
+      throw Exception(_lastError);
+    }
+
+    final newSale = Sale(
+      date: _selectedDate,
+      amountBTC: amount,
+      price: manualPrice,
+      originalCurrency: _selectedCurrency,
+    );
+    if (!holdingsStayNonNegative(_purchases, [..._sales, newSale])) {
+      _lastError = 'Not enough BTC on that date to sell';
+      notifyListeners();
+      throw Exception(_lastError);
+    }
+
     try {
-      if (amount > totalBTC) {
-        _lastError = 'Not enough BTC to sell';
-        notifyListeners();
-        throw Exception(_lastError);
-      }
-
-      final newSale = Sale(
-        date: _selectedDate,
-        amountBTC: amount,
-        price: manualPrice,
-        originalCurrency: _selectedCurrency,
-      );
-
       _sales = [..._sales, newSale];
       await _saveSales();
       notifyListeners();
@@ -469,14 +473,24 @@ class AppState with ChangeNotifier {
     }
   }
 
-  void deletePurchase(String id) {
+  /// False when removing the purchase would leave a sale larger than the coins
+  /// still held on that date. The purchase stays saved.
+  bool deletePurchase(String id) {
+    final next = _purchases.where((p) => p.id != id).toList();
+    if (!holdingsStayNonNegative(next, _sales)) {
+      _lastError = 'A sale would be larger than the coins left';
+      notifyListeners();
+      return false;
+    }
     try {
-      _purchases = _purchases.where((p) => p.id != id).toList();
+      _purchases = next;
       _savePurchases();
       notifyListeners();
+      return true;
     } catch (e) {
       _lastError = 'Failed to delete purchase: ${e.toString()}';
       notifyListeners();
+      return false;
     }
   }
 
@@ -548,40 +562,68 @@ class AppState with ChangeNotifier {
     notifyListeners();
   }
 
-  void updatePurchase(Purchase updatedPurchase) {
+  /// False when the edited purchase would leave a sale larger than the coins
+  /// held on that date. The saved purchase is left unchanged.
+  bool updatePurchase(Purchase updatedPurchase) {
+    final index = _purchases.indexWhere((p) => p.id == updatedPurchase.id);
+    if (index == -1) return false;
+    final next = [
+      ..._purchases.sublist(0, index),
+      updatedPurchase,
+      ..._purchases.sublist(index + 1),
+    ];
+    if (!holdingsStayNonNegative(next, _sales)) {
+      _lastError = 'A sale would be larger than the coins left';
+      notifyListeners();
+      return false;
+    }
     try {
-      final index = _purchases.indexWhere((p) => p.id == updatedPurchase.id);
-      if (index != -1) {
-        _purchases = [
-          ..._purchases.sublist(0, index),
-          updatedPurchase,
-          ..._purchases.sublist(index + 1)
-        ];
-        _savePurchases();
-        notifyListeners();
-      }
+      _purchases = next;
+      _savePurchases();
+      notifyListeners();
+      return true;
     } catch (e) {
       _lastError = 'Failed to update purchase: ${e.toString()}';
       notifyListeners();
+      return false;
     }
   }
 
-  void updateSale(Sale updatedSale) {
+  /// False when the edited sale is larger than the coins held on that date.
+  bool updateSale(Sale updatedSale) {
+    final index = _sales.indexWhere((s) => s.id == updatedSale.id);
+    if (index == -1) return false;
+    final next = [
+      ..._sales.sublist(0, index),
+      updatedSale,
+      ..._sales.sublist(index + 1),
+    ];
+    if (!holdingsStayNonNegative(_purchases, next)) {
+      _lastError = 'Not enough BTC on that date to sell';
+      notifyListeners();
+      return false;
+    }
     try {
-      final index = _sales.indexWhere((s) => s.id == updatedSale.id);
-      if (index != -1) {
-        _sales = [
-          ..._sales.sublist(0, index),
-          updatedSale,
-          ..._sales.sublist(index + 1)
-        ];
-        _saveSales();
-        notifyListeners();
-      }
+      _sales = next;
+      _saveSales();
+      notifyListeners();
+      return true;
     } catch (e) {
       _lastError = 'Failed to update sale: ${e.toString()}';
       notifyListeners();
+      return false;
     }
+  }
+
+  /// Starts the saved Bitcoin price download again. A download already running
+  /// is left to finish. Live price is separate and is not delayed.
+  void refreshSavedPrices() {
+    if (_savedPriceRefreshInFlight) return;
+    _savedPriceRefreshInFlight = true;
+    unawaited(_historicalFx.refreshFromNetwork(onUpdated: notifyListeners).whenComplete(() {
+      _savedPriceRefreshInFlight = false;
+      notifyListeners();
+    }));
   }
 
   double _convertCurrency(double amount, Currency from, Currency to, {DateTime? date}) {

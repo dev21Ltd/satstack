@@ -1,5 +1,7 @@
 // charts.dart - OPTIMIZED TOOLTIP VERSION WITH ACCURATE PORTFOLIO VALUE USING ACTUAL TRANSACTION PRICES
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'app_state.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
 import 'models.dart';
@@ -649,29 +651,92 @@ class _PortfolioChartState extends State<PortfolioChart>
   void _openFullScreen() {
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (context) => PortfolioChart(
-          purchases: widget.purchases,
-          sales: widget.sales,
-          isDarkMode: widget.isDarkMode,
-          currentBtcPrice: widget.currentBtcPrice,
-          currency: widget.currency,
-          portfolioValue: widget.portfolioValue,
-          totalInvestment: widget.totalInvestment,
-          profitLoss: widget.profitLoss,
-          profitLossPercentage: widget.profitLossPercentage,
-          onEditPurchase: widget.onEditPurchase,
-          onDeletePurchase: widget.onDeletePurchase,
-          onEditSale: widget.onEditSale,
-          onDeleteSale: widget.onDeleteSale,
-          denomination: widget.denomination,
-          btcPrices: widget.btcPrices,
-          holdingsHidden: widget.holdingsHidden,
-          pricesOnDate: widget.pricesOnDate,
-          marketPriceOn: widget.marketPriceOn,
-          marketPriceRevision: widget.marketPriceRevision,
-          expanded: true,
-        ),
+        builder: (routeContext) {
+          AppState? appState;
+          try {
+            appState = Provider.of<AppState>(routeContext);
+          } on ProviderNotFoundException {
+            appState = null;
+          }
+          if (appState == null) {
+            return _fullScreenChart(
+              purchases: widget.purchases,
+              sales: widget.sales,
+              isDarkMode: widget.isDarkMode,
+              currentBtcPrice: widget.currentBtcPrice,
+              currency: widget.currency,
+              portfolioValue: widget.portfolioValue,
+              totalInvestment: widget.totalInvestment,
+              profitLoss: widget.profitLoss,
+              profitLossPercentage: widget.profitLossPercentage,
+              btcPrices: widget.btcPrices,
+              holdingsHidden: widget.holdingsHidden,
+              denomination: widget.denomination,
+              pricesOnDate: widget.pricesOnDate,
+              marketPriceOn: widget.marketPriceOn,
+              marketPriceRevision: widget.marketPriceRevision,
+            );
+          }
+          return _fullScreenChart(
+            purchases: appState.purchases,
+            sales: appState.sales,
+            isDarkMode: appState.isDarkMode,
+            currentBtcPrice: appState.getBtcPrice(appState.selectedCurrency),
+            currency: appState.selectedCurrency,
+            portfolioValue: appState.portfolioValue,
+            totalInvestment: appState.totalInvestment,
+            profitLoss: appState.profitLoss,
+            profitLossPercentage: appState.profitLossPercentage,
+            btcPrices: appState.btcPrices,
+            holdingsHidden: appState.holdingsHidden,
+            denomination: appState.denomination,
+            pricesOnDate: appState.pricesOnDate,
+            marketPriceOn: appState.marketPriceOn,
+            marketPriceRevision: appState.marketPriceRevision,
+          );
+        },
       ),
+    );
+  }
+
+  Widget _fullScreenChart({
+    required List<Purchase> purchases,
+    required List<Sale> sales,
+    required bool isDarkMode,
+    required double currentBtcPrice,
+    required Currency currency,
+    required double portfolioValue,
+    required double totalInvestment,
+    required double profitLoss,
+    required double profitLossPercentage,
+    required Map<Currency, double> btcPrices,
+    required bool holdingsHidden,
+    required Denomination denomination,
+    required Map<Currency, double> Function(DateTime date)? pricesOnDate,
+    required double? Function(DateTime date)? marketPriceOn,
+    required int marketPriceRevision,
+  }) {
+    return PortfolioChart(
+      purchases: purchases,
+      sales: sales,
+      isDarkMode: isDarkMode,
+      currentBtcPrice: currentBtcPrice,
+      currency: currency,
+      portfolioValue: portfolioValue,
+      totalInvestment: totalInvestment,
+      profitLoss: profitLoss,
+      profitLossPercentage: profitLossPercentage,
+      onEditPurchase: widget.onEditPurchase,
+      onDeletePurchase: widget.onDeletePurchase,
+      onEditSale: widget.onEditSale,
+      onDeleteSale: widget.onDeleteSale,
+      denomination: denomination,
+      btcPrices: btcPrices,
+      holdingsHidden: holdingsHidden,
+      pricesOnDate: pricesOnDate,
+      marketPriceOn: marketPriceOn,
+      marketPriceRevision: marketPriceRevision,
+      expanded: true,
     );
   }
 
@@ -926,8 +991,11 @@ class _PortfolioChartState extends State<PortfolioChart>
               .isBefore(date.add(Duration(days: 1)))) {
         final purchase = sortedPurchases[currentPurchaseIndex];
         runningBTC += purchase.amountBTC;
-        runningInvestment += _convertCurrency(purchase.totalCashSpent,
-            purchase.cashCurrency, widget.currency);
+        runningInvestment += _convertCurrency(
+            purchase.totalCashSpent,
+            purchase.cashCurrency,
+            widget.currency,
+            purchase.date);
 
         // Update last known price from this transaction
         lastKnownPrice = _convertCurrency(purchase.pricePerBTC,
@@ -1654,7 +1722,7 @@ class _PortfolioChartState extends State<PortfolioChart>
                     color: widget.isDarkMode ? Colors.red[300] : Colors.red,
                     size: 20),
                 onPressed: () {
-                  widget.onDeleteSale(sale);
+                  if (widget.onDeleteSale(sale) == false) return;
                   Navigator.of(context).pop();
                 },
               ),
@@ -1736,7 +1804,10 @@ class _PortfolioChartState extends State<PortfolioChart>
                     color: widget.isDarkMode ? Colors.red[300] : Colors.red,
                     size: 20),
                 onPressed: () {
-                  widget.onDeletePurchase(purchase);
+                  if (widget.onDeletePurchase(purchase) == false) {
+                    _showBookMessage('A sale would be larger than the coins left');
+                    return;
+                  }
                   Navigator.of(context).pop();
                 },
               ),
@@ -1758,15 +1829,27 @@ class _PortfolioChartState extends State<PortfolioChart>
 
     showDialog(
         context: context,
-        builder: (BuildContext context) => _buildEditPurchaseDialog(
-            purchase, amountController, priceController, selectedDate));
+        builder: (dialogContext) {
+          return StatefulBuilder(
+            builder: (context, setDialogState) {
+              return _buildEditPurchaseDialog(
+                purchase,
+                amountController,
+                priceController,
+                selectedDate,
+                (picked) => setDialogState(() => selectedDate = picked),
+              );
+            },
+          );
+        });
   }
 
   AlertDialog _buildEditPurchaseDialog(
       Purchase purchase,
       TextEditingController amountController,
       TextEditingController priceController,
-      DateTime selectedDate) {
+      DateTime selectedDate,
+      ValueChanged<DateTime> onDatePicked) {
     return AlertDialog(
       title: Text('Edit Purchase',
           style: TextStyle(
@@ -1811,7 +1894,7 @@ class _PortfolioChartState extends State<PortfolioChart>
                     firstDate: DateTime(2009, 1, 3),
                     lastDate: DateTime.now(),
                   );
-                  if (picked != null) setState(() => selectedDate = picked);
+                  if (picked != null) onDatePicked(picked);
                 },
                 child: Text('Date: ${DateFormat('dd/MM/yyyy').format(selectedDate)}',
                     style: TextStyle(
@@ -1850,15 +1933,27 @@ class _PortfolioChartState extends State<PortfolioChart>
 
     showDialog(
         context: context,
-        builder: (context) => _buildEditSaleDialog(
-            sale, amountController, priceController, selectedDate));
+        builder: (dialogContext) {
+          return StatefulBuilder(
+            builder: (context, setDialogState) {
+              return _buildEditSaleDialog(
+                sale,
+                amountController,
+                priceController,
+                selectedDate,
+                (picked) => setDialogState(() => selectedDate = picked),
+              );
+            },
+          );
+        });
   }
 
   AlertDialog _buildEditSaleDialog(
       Sale sale,
       TextEditingController amountController,
       TextEditingController priceController,
-      DateTime selectedDate) {
+      DateTime selectedDate,
+      ValueChanged<DateTime> onDatePicked) {
     return AlertDialog(
       title: Text('Edit Sale',
           style: TextStyle(
@@ -1903,7 +1998,7 @@ class _PortfolioChartState extends State<PortfolioChart>
                     firstDate: DateTime(2009, 1, 3),
                     lastDate: DateTime.now(),
                   );
-                  if (picked != null) setState(() => selectedDate = picked);
+                  if (picked != null) onDatePicked(picked);
                 },
                 child: Text('Date: ${DateFormat('dd/MM/yyyy').format(selectedDate)}',
                     style: TextStyle(
@@ -1949,7 +2044,10 @@ class _PortfolioChartState extends State<PortfolioChart>
       price: newPrice,
       originalCurrency: sale.originalCurrency,
     );
-    widget.onEditSale(updatedSale);
+    if (widget.onEditSale(updatedSale) == false) {
+      _showBookMessage('Not enough BTC on that date to sell');
+      return;
+    }
     Navigator.of(context).pop();
   }
 
@@ -1975,8 +2073,15 @@ class _PortfolioChartState extends State<PortfolioChart>
         amountBTC: newAmount,
         pricePerBTC: newPricePerBTC,
         cashCurrency: purchase.cashCurrency);
-    widget.onEditPurchase(updatedPurchase);
+    if (widget.onEditPurchase(updatedPurchase) == false) {
+      _showBookMessage('A sale would be larger than the coins left');
+      return;
+    }
     Navigator.of(context).pop();
+  }
+
+  void _showBookMessage(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override

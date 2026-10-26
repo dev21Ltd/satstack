@@ -1,10 +1,27 @@
+import 'package:flutter/foundation.dart';
 import 'package:hive/hive.dart';
-import 'package:intl/intl.dart';
 
 import 'constants.dart';
 import 'hive_boxes.dart';
 import 'models.dart';
 import 'services.dart';
+
+/// Exchange day for a Bitcoin price. Samples are midnight UTC, so the key
+/// uses that UTC date in every timezone.
+String btcPriceDayKey(DateTime instant) {
+  final utc = instant.toUtc();
+  return _ymd(utc.year, utc.month, utc.day);
+}
+
+/// Calendar day the phone is asking about, using that date's own year,
+/// month, and day. Not converted to UTC.
+String calendarDayKey(DateTime date) => _ymd(date.year, date.month, date.day);
+
+String _ymd(int year, int month, int day) {
+  return '${year.toString().padLeft(4, '0')}-'
+      '${month.toString().padLeft(2, '0')}-'
+      '${day.toString().padLeft(2, '0')}';
+}
 
 class _DatedPrice {
   final DateTime day;
@@ -29,13 +46,11 @@ class HistoricalFx {
     DateTime date,
     Map<Currency, double> fallback,
   ) {
-    final key = DateFormat('yyyy-MM-dd').format(date);
-    final row = _byDate[key];
-    if (row == null || row.isEmpty) return fallback;
     final mapped = <Currency, double>{};
     for (final currency in Currency.values) {
-      final stored = row[currencyToString(currency).toLowerCase()];
-      mapped[currency] = stored ?? fallback[currency] ?? 0;
+      final near = priceNear(date, currency);
+      mapped[currency] =
+          (near != null && near > 0) ? near : (fallback[currency] ?? 0);
     }
     return mapped;
   }
@@ -177,6 +192,13 @@ class HistoricalFx {
     return series.first.day.isBefore(day);
   }
 
+  /// Saves [points] the way a download does, without opening Hive.
+  @visibleForTesting
+  void ingestForTest(Currency currency, List<PriceDataPoint> points) {
+    _loaded = true;
+    _ingest(currency, points);
+  }
+
   bool _ingest(
     Currency currency,
     List<PriceDataPoint> points, {
@@ -186,7 +208,7 @@ class HistoricalFx {
     var changed = false;
     for (final point in points) {
       if (point.price <= 0) continue;
-      final key = DateFormat('yyyy-MM-dd').format(point.date.toLocal());
+      final key = btcPriceDayKey(point.date);
       final row = _byDate.putIfAbsent(key, () => <String, double>{});
       if (fillGapsOnly && (row[code] ?? 0) > 0) continue;
       row[code] = point.price;

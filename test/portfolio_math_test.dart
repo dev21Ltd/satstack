@@ -76,6 +76,31 @@ void main() {
     );
   });
 
+  test('a sale before the coins were bought is rejected', () {
+    final purchases = [buy(btc: 1, price: 20000, date: DateTime(2024, 6, 1))];
+    final sales = [sell(btc: 1, price: 30000, date: DateTime(2024, 1, 1))];
+    expect(holdingsStayNonNegative(purchases, sales), isFalse);
+    expect(holdingsStayNonNegative(purchases, const []), isTrue);
+  });
+
+  test('a buy and a sale on the same day are allowed', () {
+    final day = DateTime(2024, 6, 1);
+    expect(
+      holdingsStayNonNegative(
+        [buy(btc: 1, price: 20000, date: day)],
+        [sell(btc: 1, price: 30000, date: day)],
+      ),
+      isTrue,
+    );
+  });
+
+  test('removing the only purchase behind a sale is rejected', () {
+    final purchases = [buy(btc: 1, price: 20000, date: DateTime(2024, 1, 1))];
+    final sales = [sell(btc: 1, price: 30000, date: DateTime(2024, 6, 1))];
+    expect(holdingsStayNonNegative(purchases, sales), isTrue);
+    expect(holdingsStayNonNegative(<Purchase>[], sales), isFalse);
+  });
+
   test('roiForActivityInRange uses buys and sales from start through today', () {
     final oldBuy = buy(btc: 1, price: 20000, date: DateTime(2020, 1, 1));
     final recent = buy(btc: 1, price: 90000, date: DateTime(2026, 8, 1));

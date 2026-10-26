@@ -159,3 +159,33 @@ double profitLossPercent(double profitLoss, double investment) {
   if (investment == 0) return 0;
   return (profitLoss / investment) * 100;
 }
+
+/// True when buys and sells, played in date order, never take the holding
+/// below zero. Buys on a calendar day are applied before sales that day.
+bool holdingsStayNonNegative(List<Purchase> purchases, List<Sale> sales) {
+  final events = <_HoldingEvent>[
+    for (final purchase in purchases)
+      _HoldingEvent(purchase.date, purchase.amountBTC, true),
+    for (final sale in sales) _HoldingEvent(sale.date, -sale.amountBTC, false),
+  ];
+  events.sort((a, b) {
+    final byDay = DateTime(a.date.year, a.date.month, a.date.day)
+        .compareTo(DateTime(b.date.year, b.date.month, b.date.day));
+    if (byDay != 0) return byDay;
+    if (a.isBuy != b.isBuy) return a.isBuy ? -1 : 1;
+    return a.date.compareTo(b.date);
+  });
+  var held = 0.0;
+  for (final event in events) {
+    held += event.delta;
+    if (held < -1e-8) return false;
+  }
+  return true;
+}
+
+class _HoldingEvent {
+  final DateTime date;
+  final double delta;
+  final bool isBuy;
+  const _HoldingEvent(this.date, this.delta, this.isBuy);
+}

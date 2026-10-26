@@ -103,6 +103,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
       if (_isOnline) {
         final appState = Provider.of<AppState>(context, listen: false);
         appState.fetchBtcPrices();
+        appState.refreshSavedPrices();
       }
     });
   }
@@ -111,12 +112,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     final appState = Provider.of<AppState>(context, listen: false);
     try { await appState.fetchBtcPrices(); _priceRefreshController.refreshCompleted(); }
     catch (e) { _priceRefreshController.refreshFailed(); }
+    appState.refreshSavedPrices();
   }
 
   void _onPortfolioRefresh() async {
     final appState = Provider.of<AppState>(context, listen: false);
     try { await appState.fetchBtcPrices(); _portfolioRefreshController.refreshCompleted(); }
     catch (e) { _portfolioRefreshController.refreshFailed(); }
+    appState.refreshSavedPrices();
   }
 
   void _showCurrencySettings(AppState appState) {

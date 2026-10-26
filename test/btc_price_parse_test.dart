@@ -1,4 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:satstack/constants.dart';
+import 'package:satstack/historical_fx.dart';
+import 'package:satstack/models.dart';
 import 'package:satstack/services.dart';
 
 void main() {
@@ -69,6 +72,63 @@ void main() {
     expect(points.first.date.toUtc(), DateTime.utc(2026, 10, 19));
     expect(points.last.price, closeTo(1017.12, 0.001));
     expect(points.last.date.toUtc(), DateTime.utc(2014, 1, 6));
+  });
+
+  test('a midnight UTC price stays on that calendar day', () {
+    final fx = HistoricalFx();
+    // Same instants CoinGecko returns: midnight UTC, constructed the way
+    // the parser does (epoch milliseconds, local flag).
+    PriceDataPoint atUtcMidnight(int year, int month, int day, double price) {
+      return PriceDataPoint(
+        DateTime.fromMillisecondsSinceEpoch(
+          DateTime.utc(year, month, day).millisecondsSinceEpoch,
+        ),
+        price,
+      );
+    }
+
+    fx.ingestForTest(Currency.USD, [
+      atUtcMidnight(2026, 9, 25, 50),
+      atUtcMidnight(2026, 9, 26, 100),
+    ]);
+
+    expect(fx.priceNear(DateTime(2026, 9, 26), Currency.USD), 100);
+    expect(fx.priceNear(DateTime(2026, 9, 25), Currency.USD), 50);
+    expect(
+      fx.pricesOn(DateTime(2026, 9, 26), {Currency.USD: 1})[Currency.USD],
+      100,
+    );
+    expect(btcPriceDayKey(DateTime.utc(2026, 9, 26)), '2026-09-26');
+  });
+
+  test('a missing day uses the nearest saved rate', () {
+    final fx = HistoricalFx();
+    PriceDataPoint at(int month, int day, double price) {
+      return PriceDataPoint(DateTime.utc(2024, month, day), price);
+    }
+
+    fx.ingestForTest(Currency.USD, [
+      at(9, 1, 100),
+      at(9, 20, 140),
+    ]);
+    fx.ingestForTest(Currency.GBP, [
+      PriceDataPoint(DateTime.utc(2024, 9, 1), 80),
+      PriceDataPoint(DateTime.utc(2024, 9, 20), 100),
+    ]);
+
+    final gap = fx.pricesOn(DateTime(2024, 9, 10), {
+      Currency.USD: 1,
+      Currency.GBP: 1,
+    });
+    expect(gap[Currency.USD], 100);
+    expect(gap[Currency.GBP], 80);
+
+    final exact = fx.pricesOn(DateTime(2024, 9, 20), {
+      Currency.USD: 1,
+      Currency.GBP: 1,
+    });
+    expect(exact[Currency.USD], 140);
+    expect(exact[Currency.GBP], 100);
   });
 
   test('a provider missing a currency is rejected', () {

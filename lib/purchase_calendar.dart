@@ -335,7 +335,12 @@ class _PurchaseCalendarState extends State<PurchaseCalendar> {
                                         : Colors.red,
                                     size: 20),
                                 onPressed: () {
-                                  widget.onDeletePurchase(purchase);
+                                  if (widget.onDeletePurchase(purchase) == false) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(content: Text('A sale would be larger than the coins left')),
+                                    );
+                                    return;
+                                  }
                                   Navigator.of(context).pop();
                                 },
                               ),
@@ -464,6 +469,8 @@ class _PurchaseCalendarState extends State<PurchaseCalendar> {
     showDialog(
       context: context,
       builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
         return AlertDialog(
           title: Text('Edit Purchase',
               style: TextStyle(
@@ -510,7 +517,7 @@ class _PurchaseCalendarState extends State<PurchaseCalendar> {
                       firstDate: DateTime(2009, 1, 3),
                       lastDate: DateTime.now(),
                     );
-                    if (picked != null) setState(() {
+                    if (picked != null) setDialogState(() {
                       selectedDate = picked;
                     });
                   },
@@ -558,12 +565,19 @@ class _PurchaseCalendarState extends State<PurchaseCalendar> {
                   pricePerBTC: newPricePerBTC,
                   cashCurrency: purchase.cashCurrency,
                 );
-                widget.onEditPurchase(updatedPurchase);
+                if (widget.onEditPurchase(updatedPurchase) == false) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('A sale would be larger than the coins left')),
+                  );
+                  return;
+                }
                 Navigator.of(context).pop();
               },
               child: const Text('Save'),
             ),
           ],
+        );
+          },
         );
       },
     );
@@ -582,6 +596,8 @@ class _PurchaseCalendarState extends State<PurchaseCalendar> {
     showDialog(
       context: context,
       builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
         return AlertDialog(
           title: Text('Edit Sale',
               style: TextStyle(
@@ -628,7 +644,7 @@ class _PurchaseCalendarState extends State<PurchaseCalendar> {
                       firstDate: DateTime(2009, 1, 3),
                       lastDate: DateTime.now(),
                     );
-                    if (picked != null) setState(() {
+                    if (picked != null) setDialogState(() {
                       selectedDate = picked;
                     });
                   },
@@ -675,12 +691,19 @@ class _PurchaseCalendarState extends State<PurchaseCalendar> {
                   price: newPrice,
                   originalCurrency: sale.originalCurrency,
                 );
-                widget.onEditSale(updatedSale);
+                if (widget.onEditSale(updatedSale) == false) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Not enough BTC on that date to sell')),
+                  );
+                  return;
+                }
                 Navigator.of(context).pop();
               },
               child: const Text('Save'),
             ),
           ],
+        );
+          },
         );
       },
     );
