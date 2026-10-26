@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'models.dart';
 import 'constants.dart';
+import 'surfaces.dart';
 
 class PurchaseCalendar extends StatefulWidget {
   final List<Purchase> purchases;
@@ -45,7 +46,6 @@ class PurchaseCalendar extends StatefulWidget {
 class _PurchaseCalendarState extends State<PurchaseCalendar> {
   DateTime _currentDisplayedMonth = DateTime.now();
   DateTime? _selectedDate;
-  final TextEditingController _dateController = TextEditingController();
   final DateTime _genesisBlock = DateTime(2009, 1, 3);
   double _bottomPadding = 0;
 
@@ -97,18 +97,6 @@ class _PurchaseCalendarState extends State<PurchaseCalendar> {
     });
   }
 
-  void _selectYear(int year) {
-    setState(() {
-      _currentDisplayedMonth = DateTime(year, _currentDisplayedMonth.month);
-    });
-  }
-
-  void _selectMonth(int month) {
-    setState(() {
-      _currentDisplayedMonth = DateTime(_currentDisplayedMonth.year, month);
-    });
-  }
-
   void _jumpToDate(DateTime date) {
     setState(() {
       _currentDisplayedMonth = DateTime(date.year, date.month);
@@ -117,33 +105,20 @@ class _PurchaseCalendarState extends State<PurchaseCalendar> {
     widget.onDateSelected(date);
   }
 
-  void _handleDateInput() {
-    try {
-      final input = _dateController.text.trim();
-      final parts = input.split('/');
-      if (parts.length == 3) {
-        final day = int.parse(parts[0]);
-        final month = int.parse(parts[1]);
-        final year = int.parse(parts[2]);
-        final newDate = DateTime(year, month, day);
-        if (newDate.isAfter(_genesisBlock) &&
-            newDate.isBefore(DateTime.now().add(const Duration(days: 1)))) {
-          _jumpToDate(newDate);
-        } else {
-          _showError('Date must be between 03/01/2009 and today');
-        }
-      } else {
-        _showError('Please use DD/MM/YYYY format');
-      }
-    } catch (e) {
-      _showError('Invalid date format');
-    }
-  }
-
-  void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: Colors.red),
+  Future<void> _pickJumpDate() async {
+    final now = DateTime.now();
+    var initial = _selectedDate ?? _currentDisplayedMonth;
+    if (initial.isBefore(_genesisBlock)) initial = _genesisBlock;
+    if (initial.isAfter(now)) initial = now;
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: _genesisBlock,
+      lastDate: now,
     );
+    if (picked != null) {
+      _jumpToDate(DateTime(picked.year, picked.month, picked.day));
+    }
   }
 
   bool _isPurchaseDate(DateTime date) {
@@ -249,7 +224,8 @@ class _PurchaseCalendarState extends State<PurchaseCalendar> {
           title: Text('${date.day}/${date.month}/${date.year}',
               style: TextStyle(
                   color: widget.isDarkMode ? Colors.white : Colors.black)),
-          backgroundColor: widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+          backgroundColor: satDialogFill(widget.isDarkMode),
+          shape: satDialogShape(widget.isDarkMode),
           content: SingleChildScrollView(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -475,7 +451,8 @@ class _PurchaseCalendarState extends State<PurchaseCalendar> {
           title: Text('Edit Purchase',
               style: TextStyle(
                   color: widget.isDarkMode ? Colors.white : Colors.black)),
-          backgroundColor: widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+          backgroundColor: satDialogFill(widget.isDarkMode),
+          shape: satDialogShape(widget.isDarkMode),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -602,7 +579,8 @@ class _PurchaseCalendarState extends State<PurchaseCalendar> {
           title: Text('Edit Sale',
               style: TextStyle(
                   color: widget.isDarkMode ? Colors.white : Colors.black)),
-          backgroundColor: widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+          backgroundColor: satDialogFill(widget.isDarkMode),
+          shape: satDialogShape(widget.isDarkMode),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -772,20 +750,17 @@ class _PurchaseCalendarState extends State<PurchaseCalendar> {
       final isBeforeGenesis = currentDate.isBefore(_genesisBlock);
       final isAfterToday = currentDate.isAfter(DateTime.now());
 
-      final isPureSaleDate = isSaleDate && !isPurchaseDate;
-
-      Color dateColor = Colors.transparent;
-      if (isSelected) {
-        dateColor = const Color(0xFFF7931A);
-      } else if (isPureSaleDate) {
-        dateColor = Colors.purple.withOpacity(0.8);
-      } else if (isPurchaseDate) {
-        dateColor = isProfit
-            ? Colors.green.withOpacity(0.8)
-            : Colors.red.withOpacity(0.8);
-      } else if (isToday) {
-        dateColor = widget.isDarkMode ? Colors.grey[800]! : Colors.grey[300]!;
-      }
+      final marks = <Color>[
+        if (isPurchaseDate) isProfit ? Colors.green : Colors.red,
+        if (isSaleDate) Colors.purple,
+      ];
+      final dayColor = isBeforeGenesis || isAfterToday
+          ? Colors.grey
+          : isSelected
+              ? Colors.black
+              : widget.isDarkMode
+                  ? Colors.white
+                  : Colors.black;
 
       dayWidgets.add(
         Container(
@@ -809,53 +784,43 @@ class _PurchaseCalendarState extends State<PurchaseCalendar> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Container(
-                  width: MediaQuery.of(context).size.width < 400 ? 28 : 32,
-                  height: MediaQuery.of(context).size.width < 400 ? 28 : 32,
+                  width: 32,
+                  height: 32,
+                  alignment: Alignment.center,
                   decoration: BoxDecoration(
-                    color: dateColor,
+                    color: isSelected ? const Color(0xFFF7931A) : Colors.transparent,
                     shape: BoxShape.circle,
-                    border: isToday && !isSelected
-                        ? Border.all(color: const Color(0xFFF7931A), width: 1.5)
-                        : null,
+                    border: !isSelected && marks.isNotEmpty
+                        ? Border.all(color: marks.first, width: 2.5)
+                        : isToday && !isSelected
+                            ? Border.all(color: widget.isDarkMode ? Colors.white24 : Colors.black26)
+                            : null,
                   ),
-                  child: Center(
-                    child: Text(
-                      day.toString(),
-                      style: TextStyle(
-                        fontWeight: FontWeight.w500,
-                        fontSize: MediaQuery.of(context).size.width < 400
-                            ? 10
-                            : 12,
-                        color: isBeforeGenesis || isAfterToday
-                            ? Colors.grey
-                            : isSelected
-                            ? Colors.black
-                            : (isPurchaseDate || isPureSaleDate)
-                            ? Colors.white
-                            : widget.isDarkMode
-                            ? Colors.white
-                            : Colors.black,
-                      ),
+                  child: Text(
+                    day.toString(),
+                    style: TextStyle(
+                      fontWeight: FontWeight.w500,
+                      fontSize: 12,
+                      color: dayColor,
                     ),
                   ),
                 ),
-                if (isSaleDate && isPurchaseDate)
-                  Container(
-                    width: 6,
-                    height: 6,
-                    margin: const EdgeInsets.only(top: 2),
-                    decoration: BoxDecoration(
-                      color: Colors.purple,
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.3),
-                          blurRadius: 1,
-                          offset: Offset(0, 1),
+                const SizedBox(height: 3),
+                SizedBox(
+                  height: 8,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      for (final mark in marks)
+                        Container(
+                          width: 8,
+                          height: 8,
+                          margin: const EdgeInsets.symmetric(horizontal: 1.5),
+                          decoration: BoxDecoration(color: mark, shape: BoxShape.circle),
                         ),
-                      ],
-                    ),
+                    ],
                   ),
+                ),
               ],
             ),
           ),
@@ -868,37 +833,16 @@ class _PurchaseCalendarState extends State<PurchaseCalendar> {
 
   @override
   Widget build(BuildContext context) {
-    final currentYear = DateTime.now().year;
-    final years = List<int>.generate(currentYear - 2009 + 1,
-            (i) => 2009 + i);
-    final List<String> monthNames = [
-      "Jan",
-      "Feb",
-      "Mar",
-      "Apr",
-      "May",
-      "Jun",
-      "Jul",
-      "Aug",
-      "Sep",
-      "Oct",
-      "Nov",
-      "Dec"
+    const monthNames = [
+      "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
     ];
+    final labelColor = widget.isDarkMode ? Colors.white : Colors.black;
 
     return Container(
       width: double.infinity,
       constraints: const BoxConstraints(maxWidth: 600),
-      decoration: BoxDecoration(
-        color: widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.grey[100],
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withOpacity(0.1),
-              blurRadius: 8,
-              offset: const Offset(0, 2))
-        ],
-      ),
+      decoration: satCard(widget.isDarkMode),
       padding: EdgeInsets.only(bottom: _bottomPadding),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -906,205 +850,62 @@ class _PurchaseCalendarState extends State<PurchaseCalendar> {
           Padding(
             padding: const EdgeInsets.only(top: 16.0),
             child: Text('Purchase Calendar',
-                style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: widget.isDarkMode ? Colors.white : Colors.black)),
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: labelColor)),
           ),
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
-            decoration: BoxDecoration(
-              color: widget.isDarkMode ? const Color(0xFF2D2D2D) : Colors.grey[200],
-              borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(12), topRight: Radius.circular(12)),
-            ),
-            child: Column(
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Container(
-                        height: 40,
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        decoration: BoxDecoration(
-                          color: widget.isDarkMode ? Colors.grey[700] : Colors.white,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                              color: widget.isDarkMode
-                                  ? Colors.grey[600]!
-                                  : Colors.grey[400]!,
-                              width: 1.5),
-                        ),
-                        child: DropdownButton<int>(
-                          value: _currentDisplayedMonth.month,
-                          items: List.generate(12, (index) {
-                            return DropdownMenuItem<int>(
-                              value: index + 1,
-                              child: Text(monthNames[index],
-                                  style: TextStyle(
-                                      color: widget.isDarkMode
-                                          ? Colors.white
-                                          : Colors.black,
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w500)),
-                            );
-                          }).toList(),
-                          onChanged: (value) => _selectMonth(value!),
-                          dropdownColor:
-                          widget.isDarkMode ? Colors.grey[800] : Colors.white,
-                          underline: const SizedBox(),
-                          icon: Icon(Icons.arrow_drop_down,
-                              color: widget.isDarkMode
-                                  ? Colors.white70
-                                  : Colors.black54,
-                              size: 24),
-                          isExpanded: true,
-                          style: TextStyle(
-                              color:
-                              widget.isDarkMode ? Colors.white : Colors.black,
-                              fontSize: 14),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Container(
-                        height: 40,
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        decoration: BoxDecoration(
-                          color: widget.isDarkMode ? Colors.grey[700] : Colors.white,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                              color: widget.isDarkMode
-                                  ? Colors.grey[600]!
-                                  : Colors.grey[400]!,
-                              width: 1.5),
-                        ),
-                        child: DropdownButton<int>(
-                          value: _currentDisplayedMonth.year,
-                          items: years.map((int year) {
-                            return DropdownMenuItem<int>(
-                              value: year,
-                              child: Text(year.toString(),
-                                  style: TextStyle(
-                                      color: widget.isDarkMode
-                                          ? Colors.white
-                                          : Colors.black,
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w500)),
-                            );
-                          }).toList(),
-                          onChanged: (value) => _selectYear(value!),
-                          dropdownColor:
-                          widget.isDarkMode ? Colors.grey[800] : Colors.white,
-                          underline: const SizedBox(),
-                          icon: Icon(Icons.arrow_drop_down,
-                              color: widget.isDarkMode
-                                  ? Colors.white70
-                                  : Colors.black54,
-                              size: 24),
-                          isExpanded: true,
-                          style: TextStyle(
-                              color:
-                              widget.isDarkMode ? Colors.white : Colors.black,
-                              fontSize: 14),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                    ),
-                  ],
+          Row(
+            children: [
+              IconButton(
+                tooltip: 'Previous month',
+                icon: Icon(Icons.chevron_left, color: labelColor),
+                onPressed: _previousMonth,
+              ),
+              Expanded(
+                child: Text(
+                  '${monthNames[_currentDisplayedMonth.month - 1]} ${_currentDisplayedMonth.year}',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16, color: labelColor),
                 ),
-                const SizedBox(height: 12),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    IconButton(
-                        icon: Icon(Icons.chevron_left,
-                            color: widget.isDarkMode ? Colors.white : Colors.black,
-                            size: 24),
-                        onPressed: _previousMonth),
-                    Text(
-                        '${monthNames[_currentDisplayedMonth.month - 1]} ${_currentDisplayedMonth.year}',
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                            color: widget.isDarkMode ? Colors.white : Colors.black)),
-                    IconButton(
-                        icon: Icon(Icons.chevron_right,
-                            color: widget.isDarkMode ? Colors.white : Colors.black,
-                            size: 24),
-                        onPressed: _nextMonth),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _dateController,
-                    decoration: InputDecoration(
-                      labelText: 'DD/MM/YYYY',
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: BorderSide(
-                              color: widget.isDarkMode
-                                  ? Colors.grey[600]!
-                                  : Colors.grey[400]!,
-                              width: 1.5)),
-                      filled: true,
-                      fillColor: widget.isDarkMode ? Colors.grey[800] : Colors.white,
-                      labelStyle: TextStyle(
-                          color: widget.isDarkMode ? Colors.white70 : Colors.black54,
-                          fontSize: 14),
-                      contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                    ),
-                    style: TextStyle(
-                        color: widget.isDarkMode ? Colors.white : Colors.black,
-                        fontSize: 14),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                ElevatedButton(
-                  onPressed: _handleDateInput,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFF7931A),
-                    foregroundColor: Colors.black,
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8)),
-                  ),
-                  child: const Text('Go',
-                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
-                ),
-              ],
-            ),
+              ),
+              IconButton(
+                tooltip: 'Jump to date',
+                icon: Icon(Icons.calendar_month_outlined, color: labelColor, size: 22),
+                onPressed: _pickJumpDate,
+              ),
+              IconButton(
+                tooltip: 'Next month',
+                icon: Icon(Icons.chevron_right, color: labelColor),
+                onPressed: _nextMonth,
+              ),
+            ],
           ),
           Padding(
               padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
               child: Row(children: _buildDayHeaders())),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final cellSize = constraints.maxWidth / 7;
-              return Container(
-                height: cellSize * 6,
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: GridView.count(
-                  crossAxisCount: 7,
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  childAspectRatio: 1.0,
-                  children: _buildDays(),
-                ),
-              );
+          GestureDetector(
+            onHorizontalDragEnd: (details) {
+              final velocity = details.primaryVelocity ?? 0;
+              if (velocity > 250) {
+                _previousMonth();
+              } else if (velocity < -250) {
+                _nextMonth();
+              }
             },
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final cellSize = constraints.maxWidth / 7;
+                return Container(
+                  height: cellSize * 6 / 0.82,
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: GridView.count(
+                    crossAxisCount: 7,
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    childAspectRatio: 0.82,
+                    children: _buildDays(),
+                  ),
+                );
+              },
+            ),
           ),
           const SizedBox(height: 8),
         ],

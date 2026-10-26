@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import 'models.dart';
 import 'constants.dart';
 import 'portfolio_math.dart';
+import 'surfaces.dart';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:flutter_animate/flutter_animate.dart';
@@ -583,9 +584,10 @@ class _PortfolioChartState extends State<PortfolioChart>
     with SingleTickerProviderStateMixin {
   late AnimationController _animationController;
   late Animation<double> _animation;
+  bool _playLineMotion = true;
   List<PortfolioDataPoint> _portfolioData = [];
   double _minValue = 0, _maxValue = 0;
-  bool _isInitialized = false;
+
   PortfolioTimeRange _selectedTimeRange = PortfolioTimeRange.MONTH_1;
   double _averagePurchasePrice = 0, _totalBTC = 0;
   int? _hoveredIndex;
@@ -612,32 +614,30 @@ class _PortfolioChartState extends State<PortfolioChart>
         parent: _animationController, curve: Curves.easeOutCubic);
     _calculatePortfolioData(notify: false);
     _animationController.forward();
-    _isInitialized = true;
   }
 
   @override
   void didUpdateWidget(PortfolioChart oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.purchases.length != widget.purchases.length ||
+    final bookChanged = oldWidget.purchases.length != widget.purchases.length ||
         oldWidget.sales.length != widget.sales.length ||
         oldWidget.currency != widget.currency ||
-        oldWidget.currentBtcPrice != widget.currentBtcPrice ||
+        oldWidget.holdingsHidden != widget.holdingsHidden;
+    final figuresChanged = oldWidget.currentBtcPrice != widget.currentBtcPrice ||
         oldWidget.portfolioValue != widget.portfolioValue ||
         oldWidget.totalInvestment != widget.totalInvestment ||
         oldWidget.profitLoss != widget.profitLoss ||
-        oldWidget.holdingsHidden != widget.holdingsHidden ||
-        oldWidget.marketPriceRevision != widget.marketPriceRevision) {
+        oldWidget.marketPriceRevision != widget.marketPriceRevision;
+    if (bookChanged || figuresChanged) {
       _calculatePortfolioData(notify: false);
-      if (_isInitialized) {
-        _animationController.reset();
-        _animationController.forward();
-      }
+      _playLineMotion = bookChanged;
     }
   }
 
   void _setTimeRange(PortfolioTimeRange timeRange) {
     setState(() {
       _selectedTimeRange = timeRange;
+      _playLineMotion = true;
       _calculatePortfolioData(notify: false);
     });
   }
@@ -1605,7 +1605,8 @@ class _PortfolioChartState extends State<PortfolioChart>
       title: Text(title,
           style: TextStyle(
               color: widget.isDarkMode ? Colors.white : Colors.black)),
-      backgroundColor: widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+      backgroundColor: satDialogFill(widget.isDarkMode),
+      shape: satDialogShape(widget.isDarkMode),
       content: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1854,7 +1855,8 @@ class _PortfolioChartState extends State<PortfolioChart>
       title: Text('Edit Purchase',
           style: TextStyle(
               color: widget.isDarkMode ? Colors.white : Colors.black)),
-      backgroundColor: widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+      backgroundColor: satDialogFill(widget.isDarkMode),
+      shape: satDialogShape(widget.isDarkMode),
       content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -1958,7 +1960,8 @@ class _PortfolioChartState extends State<PortfolioChart>
       title: Text('Edit Sale',
           style: TextStyle(
               color: widget.isDarkMode ? Colors.white : Colors.black)),
-      backgroundColor: widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+      backgroundColor: satDialogFill(widget.isDarkMode),
+      shape: satDialogShape(widget.isDarkMode),
       content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -2097,10 +2100,10 @@ class _PortfolioChartState extends State<PortfolioChart>
       return _buildChartCard(profitLossColor, compact: compact);
     }
     return Scaffold(
-      backgroundColor: widget.isDarkMode ? const Color(0xFF121212) : Colors.grey[100],
+      backgroundColor: widget.isDarkMode ? const Color(0xFF0E0E10) : const Color(0xFFF6F6F7),
       appBar: AppBar(
         title: const Text('Chart'),
-        backgroundColor: widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.grey[200],
+        backgroundColor: widget.isDarkMode ? const Color(0xFF0E0E10) : const Color(0xFFF6F6F7),
         foregroundColor: widget.isDarkMode ? Colors.white : Colors.black,
         toolbarHeight: compact ? 44 : 56,
       ),
@@ -2132,17 +2135,7 @@ class _PortfolioChartState extends State<PortfolioChart>
     double? chartHeight,
   }) {
     return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        color: widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          )
-        ],
-      ),
+      decoration: satCard(widget.isDarkMode, hero: true),
       padding: EdgeInsets.all(compact ? 12 : 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2191,94 +2184,66 @@ class _PortfolioChartState extends State<PortfolioChart>
   }
 
   Widget _buildCleanHeader(Color profitLossColor) {
-    final bitcoinPriceFormat =
-    NumberFormat.currency(symbol: _getCurrencySymbol(widget.currency), decimalDigits: 0);
-    final stackValueFormat =
-    NumberFormat.currency(symbol: _getCurrencySymbol(widget.currency), decimalDigits: 0);
+    final symbol = _getCurrencySymbol(widget.currency);
+    final stack = widget.holdingsHidden
+        ? '****'
+        : NumberFormat.currency(symbol: symbol, decimalDigits: 0).format(widget.portfolioValue);
+    final btc = NumberFormat.currency(symbol: symbol, decimalDigits: 0).format(widget.currentBtcPrice);
+    final pnl = widget.holdingsHidden ? '****' : _formatCleanValue(widget.profitLoss, widget.currency);
+    final pct = widget.holdingsHidden ? '****%' : '${widget.profitLossPercentage.toStringAsFixed(2)}%';
+    final muted = widget.isDarkMode ? Colors.white54 : Colors.black54;
+    const figures = [FontFeature.tabularFigures()];
 
-    return Container(
-        padding: EdgeInsets.symmetric(vertical: 8),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            _buildHeaderItem(
-                title: 'Bitcoin Price',
-                value: bitcoinPriceFormat.format(widget.currentBtcPrice),
-                subtitle: currencyToString(widget.currency),
-                icon: Icons.currency_bitcoin,
-                iconColor: Color(0xFFF7931A),
-                valueColor: widget.isDarkMode ? Colors.white : Colors.black),
-            _buildHeaderItem(
-                title: 'Stack Value',
-                value: widget.holdingsHidden
-                    ? '****'
-                    : stackValueFormat.format(widget.portfolioValue),
-                subtitle: widget.holdingsHidden
-                    ? '****'
-                    : currencyToString(widget.currency),
-                icon: Icons.account_balance_wallet,
-                iconColor: Colors.blue,
-                valueColor: widget.isDarkMode ? Colors.white : Colors.black),
-            _buildHeaderItem(
-                title: 'P&L',
-                value: widget.holdingsHidden
-                    ? '****'
-                    : _formatCleanValue(widget.profitLoss, widget.currency),
-                subtitle: widget.holdingsHidden
-                    ? '****%'
-                    : '${widget.profitLossPercentage.toStringAsFixed(2)}%',
-                icon: widget.profitLoss >= 0
-                    ? Icons.trending_up
-                    : Icons.trending_down,
-                iconColor: profitLossColor,
-                valueColor: profitLossColor),
-          ],
-        ));
-  }
-
-  Widget _buildHeaderItem(
-      {required String title,
-        required String value,
-        required String subtitle,
-        required IconData icon,
-        required Color iconColor,
-        required Color valueColor}) {
-    return Expanded(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+    return Padding(
+      padding: const EdgeInsets.only(top: 2, bottom: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.account_balance_wallet_outlined, size: 14, color: muted),
+              const SizedBox(width: 6),
+              Text('Stack Value', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: muted)),
+            ],
+          ),
+          const SizedBox(height: 2),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              stack,
+              style: TextStyle(
+                fontSize: 34,
+                fontWeight: FontWeight.w600,
+                height: 1.05,
+                fontFeatures: figures,
+                color: widget.isDarkMode ? Colors.white : Colors.black,
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Row(
               children: [
-                Icon(icon, color: iconColor, size: 16),
-                SizedBox(width: 6),
-                Flexible(
-                  child: Text(title,
-                      style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: widget.isDarkMode ? Colors.white70 : Colors.black54),
-                      overflow: TextOverflow.ellipsis),
+                const Icon(Icons.currency_bitcoin, size: 15, color: Color(0xFFF7931A)),
+                const SizedBox(width: 4),
+                Text('BTC $btc', style: TextStyle(color: muted, fontSize: 13, fontFeatures: figures)),
+                Text('   ·   ', style: TextStyle(color: muted, fontSize: 13)),
+                Icon(
+                  widget.profitLoss >= 0 ? Icons.trending_up : Icons.trending_down,
+                  size: 15,
+                  color: profitLossColor,
                 ),
+                const SizedBox(width: 4),
+                Text('$pnl  $pct', style: TextStyle(color: profitLossColor, fontSize: 13, fontWeight: FontWeight.w600, fontFeatures: figures)),
               ],
             ),
-            SizedBox(height: 6),
-            FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Text(value,
-                  style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      color: valueColor),
-                  maxLines: 1),
-            ),
-            SizedBox(height: 2),
-            Text(subtitle,
-                style: TextStyle(
-                    fontSize: 11,
-                    color: widget.isDarkMode ? Colors.white54 : Colors.black54)),
-          ],
-        ));
+          ),
+        ],
+      ),
+    );
   }
 
   String _formatCleanValue(double value, Currency currency) {
@@ -2308,7 +2273,16 @@ class _PortfolioChartState extends State<PortfolioChart>
                   return const SizedBox.expand();
                 }
                 try {
-                  return LineChart(_buildChartData());
+                  final play = _playLineMotion;
+                  if (play) {
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      _playLineMotion = false;
+                    });
+                  }
+                  return LineChart(
+                    _buildChartData(),
+                    duration: play ? const Duration(milliseconds: 280) : Duration.zero,
+                  );
                 } catch (e, st) {
                   print('LineChart error: $e\n$st');
                   return const Center(child: Text('Chart unavailable'));
@@ -2407,14 +2381,6 @@ class _PortfolioChartState extends State<PortfolioChart>
   }
 
   Widget _buildTimeRangeSelector() {
-    Widget row(List<PortfolioTimeRange> ranges) {
-      return Row(
-        children: [
-          for (final range in ranges) _buildTimeRangeButton(range),
-        ],
-      );
-    }
-
     const all = [
       PortfolioTimeRange.MONTH_1,
       PortfolioTimeRange.MONTH_6,
@@ -2426,46 +2392,37 @@ class _PortfolioChartState extends State<PortfolioChart>
       PortfolioTimeRange.YEAR_10,
       PortfolioTimeRange.MAX,
     ];
-    if (MediaQuery.sizeOf(context).width >= 640) {
-      return row(all);
-    }
-    return Column(
-      children: [
-        row(all.sublist(0, 5)),
-        const SizedBox(height: 4),
-        row(all.sublist(5)),
-      ],
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [for (final range in all) _buildTimeRangeButton(range)],
+      ),
     );
   }
 
   Widget _buildTimeRangeButton(PortfolioTimeRange timeRange) {
     final isSelected = _selectedTimeRange == timeRange;
-    return Expanded(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 2),
-        child: ElevatedButton(
-            style: ElevatedButton.styleFrom(
-                backgroundColor: isSelected
-                    ? Color(0xFFF7931A)
-                    : widget.isDarkMode ? Colors.grey[800] : Colors.grey[300],
-                padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 6),
-                minimumSize: const Size(0, 32),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(6))),
-            onPressed: () => _setTimeRange(timeRange),
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Text(_getTimeRangeLabel(timeRange),
-                  style: TextStyle(
-                      color: isSelected
-                          ? Colors.black
-                          : widget.isDarkMode ? Colors.white : Colors.black,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600),
-                  textAlign: TextAlign.center,
-                  maxLines: 1),
-            )),
+    final outline = widget.isDarkMode ? Colors.white24 : Colors.black26;
+    return Padding(
+      padding: const EdgeInsets.only(right: 6),
+      child: ElevatedButton(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: isSelected ? const Color(0xFFF7931A) : Colors.transparent,
+          foregroundColor: isSelected ? Colors.black : (widget.isDarkMode ? Colors.white : Colors.black),
+          elevation: 0,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          minimumSize: const Size(0, 32),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: BorderSide(color: isSelected ? const Color(0xFFF7931A) : outline),
+          ),
+        ),
+        onPressed: () => _setTimeRange(timeRange),
+        child: Text(
+          _getTimeRangeLabel(timeRange),
+          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+        ),
       ),
     );
   }
@@ -2644,24 +2601,11 @@ class _PortfolioChartState extends State<PortfolioChart>
       ),
       gridData: FlGridData(
         show: true,
-        drawVerticalLine: true,
+        drawVerticalLine: false,
         drawHorizontalLine: true,
         horizontalInterval: _yInterval,
-        verticalInterval: kUseNiceChartAxes ? 1 : _getTimeInterval(),
-        checkToShowVerticalLine: (value) {
-          if (!kUseNiceChartAxes) return true;
-          return _xTicks.contains(value.round());
-        },
         getDrawingHorizontalLine: (value) => FlLine(
-          color: widget.isDarkMode
-              ? Colors.grey.withOpacity(0.15)
-              : Colors.grey.withOpacity(0.15),
-          strokeWidth: 1,
-        ),
-        getDrawingVerticalLine: (value) => FlLine(
-          color: widget.isDarkMode
-              ? Colors.grey.withOpacity(0.08)
-              : Colors.grey.withOpacity(0.08),
+          color: widget.isDarkMode ? Colors.white.withOpacity(0.06) : Colors.black.withOpacity(0.06),
           strokeWidth: 1,
         ),
       ),
@@ -2861,11 +2805,11 @@ class _PortfolioChartState extends State<PortfolioChart>
         show: true,
         gradient: LinearGradient(
           colors: [
-            _portfolioColor.withOpacity(0.3),
-            _portfolioColor.withOpacity(0.1),
+            _portfolioColor.withOpacity(0.16),
+            _portfolioColor.withOpacity(0.04),
             Colors.transparent,
           ],
-          stops: [0.0, 0.5, 1.0],
+          stops: const [0.0, 0.45, 1.0],
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
         ),
@@ -2939,11 +2883,7 @@ class _PortfolioChartState extends State<PortfolioChart>
           );
         },
       ),
-      shadow: Shadow(
-        color: _portfolioColor.withOpacity(0.2),
-        blurRadius: 8,
-        offset: Offset(0, 4),
-      ),
+      shadow: const Shadow(color: Colors.transparent),
     );
   }
 
@@ -3098,15 +3038,7 @@ class _PortfolioChartState extends State<PortfolioChart>
   Widget _buildEmptyState() {
     return Container(
         height: 320,
-        decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            color: widget.isDarkMode ? Color(0xFF1E1E1E) : Colors.white,
-            boxShadow: [
-              BoxShadow(
-                  color: Colors.black.withOpacity(0.1),
-                  blurRadius: 10,
-                  offset: Offset(0, 4))
-            ]),
+        decoration: satCard(widget.isDarkMode, hero: true),
         child: Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -3132,26 +3064,9 @@ class _PortfolioChartState extends State<PortfolioChart>
   Widget _buildLoadingState() {
     return Container(
         height: 320,
-        decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            color: widget.isDarkMode ? Color(0xFF1E1E1E) : Colors.white,
-            boxShadow: [
-              BoxShadow(
-                  color: Colors.black.withOpacity(0.1),
-                  blurRadius: 10,
-                  offset: Offset(0, 4))
-            ]),
+        decoration: satCard(widget.isDarkMode, hero: true),
         child: Center(
             child: CircularProgressIndicator(color: Color(0xFFF7931A))));
-  }
-
-  double _getTimeInterval() {
-    final dataLength = _portfolioData.length;
-    if (dataLength <= 10) return 1;
-    if (dataLength <= 20) return 2;
-    if (dataLength <= 50) return 5;
-    if (dataLength <= 100) return 10;
-    return (dataLength / 8).ceilToDouble();
   }
 
   double _getPriceInterval(double minPrice, double maxPrice) {

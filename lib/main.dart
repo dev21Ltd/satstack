@@ -12,6 +12,7 @@ import 'services.dart';
 import 'app_keys.dart';
 import 'hive_boxes.dart';
 import 'pin_crypto.dart';
+import 'surfaces.dart';
 
 Future<void> _registerAdapters() async {
   if (!Hive.isAdapterRegistered(0)) {
@@ -78,53 +79,71 @@ class MyApp extends StatelessWidget {
             title: 'SatStack',
             theme: appState.isDarkMode
                 ? ThemeData.dark().copyWith(
-              scaffoldBackgroundColor: const Color(0xFF121212),
+              scaffoldBackgroundColor: const Color(0xFF0E0E10),
               appBarTheme: const AppBarTheme(
-                backgroundColor: Color(0xFF1E1E1E),
+                backgroundColor: Color(0xFF0E0E10),
                 foregroundColor: Colors.white,
+                elevation: 0,
+                scrolledUnderElevation: 0,
+                surfaceTintColor: Colors.transparent,
               ),
               floatingActionButtonTheme: const FloatingActionButtonThemeData(
                 backgroundColor: bitcoinOrange,
               ),
               cardColor: const Color(0xFF1E1E1E),
+              dialogTheme: DialogThemeData(
+                backgroundColor: satDialogFill(true),
+                surfaceTintColor: Colors.transparent,
+                elevation: 0,
+                shape: satDialogShape(true),
+              ),
               popupMenuTheme: PopupMenuThemeData(
-                color: const Color(0xFF2D2D2D),
+                color: satDialogFill(true),
                 surfaceTintColor: Colors.transparent,
                 elevation: 8,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                textStyle: const TextStyle(color: Colors.white, fontSize: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                textStyle: const TextStyle(color: Colors.white, fontSize: 14, fontFeatures: [FontFeature.tabularFigures()]),
               ),
               textTheme: const TextTheme(
-                bodyLarge: TextStyle(fontSize: 16.0),
-                bodyMedium: TextStyle(fontSize: 14.0),
-                titleLarge: TextStyle(fontSize: 18.0, fontWeight: FontWeight.bold),
-                titleMedium: TextStyle(fontSize: 16.0, fontWeight: FontWeight.w600),
-                labelLarge: TextStyle(fontSize: 14.0),
+                bodyLarge: TextStyle(fontSize: 16.0, fontFeatures: [FontFeature.tabularFigures()]),
+                bodyMedium: TextStyle(fontSize: 14.0, fontFeatures: [FontFeature.tabularFigures()]),
+                titleLarge: TextStyle(fontSize: 18.0, fontWeight: FontWeight.w600, fontFeatures: [FontFeature.tabularFigures()]),
+                titleMedium: TextStyle(fontSize: 16.0, fontWeight: FontWeight.w600, fontFeatures: [FontFeature.tabularFigures()]),
+                labelLarge: TextStyle(fontSize: 14.0, fontFeatures: [FontFeature.tabularFigures()]),
               ),
             )
                 : ThemeData.light().copyWith(
-              scaffoldBackgroundColor: Colors.grey[100],
-              appBarTheme: AppBarTheme(
-                backgroundColor: Colors.grey[200],
+              scaffoldBackgroundColor: const Color(0xFFF6F6F7),
+              appBarTheme: const AppBarTheme(
+                backgroundColor: Color(0xFFF6F6F7),
                 foregroundColor: Colors.black,
+                elevation: 0,
+                scrolledUnderElevation: 0,
+                surfaceTintColor: Colors.transparent,
               ),
               floatingActionButtonTheme: const FloatingActionButtonThemeData(
                 backgroundColor: bitcoinOrange,
               ),
-              cardColor: Colors.grey[200],
+              cardColor: Colors.white,
+              dialogTheme: DialogThemeData(
+                backgroundColor: satDialogFill(false),
+                surfaceTintColor: Colors.transparent,
+                elevation: 0,
+                shape: satDialogShape(false),
+              ),
               popupMenuTheme: PopupMenuThemeData(
                 color: Colors.white,
                 surfaceTintColor: Colors.transparent,
                 elevation: 8,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                textStyle: const TextStyle(color: Colors.black, fontSize: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                textStyle: const TextStyle(color: Colors.black, fontSize: 14, fontFeatures: [FontFeature.tabularFigures()]),
               ),
               textTheme: const TextTheme(
-                bodyLarge: TextStyle(fontSize: 16.0),
-                bodyMedium: TextStyle(fontSize: 14.0),
-                titleLarge: TextStyle(fontSize: 18.0, fontWeight: FontWeight.bold),
-                titleMedium: TextStyle(fontSize: 16.0, fontWeight: FontWeight.w600),
-                labelLarge: TextStyle(fontSize: 14.0),
+                bodyLarge: TextStyle(fontSize: 16.0, fontFeatures: [FontFeature.tabularFigures()]),
+                bodyMedium: TextStyle(fontSize: 14.0, fontFeatures: [FontFeature.tabularFigures()]),
+                titleLarge: TextStyle(fontSize: 18.0, fontWeight: FontWeight.w600, fontFeatures: [FontFeature.tabularFigures()]),
+                titleMedium: TextStyle(fontSize: 16.0, fontWeight: FontWeight.w600, fontFeatures: [FontFeature.tabularFigures()]),
+                labelLarge: TextStyle(fontSize: 14.0, fontFeatures: [FontFeature.tabularFigures()]),
               ),
             ),
             home: const AppStartupScreen(),

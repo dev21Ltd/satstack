@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'constants.dart';
 import 'pin_crypto.dart';
 import 'security_service.dart';
+import 'surfaces.dart';
 
 class TimeRangeSelector extends StatelessWidget {
   final TimeRange selectedTimeRange;
@@ -20,15 +21,17 @@ class TimeRangeSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: TimeRange.values.map((range) {
-        return Expanded(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 2),
-            child: _buildTimeRangeButton(range),
-          ),
-        );
-      }).toList(),
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          for (final range in TimeRange.values)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: _buildTimeRangeButton(range),
+            ),
+        ],
+      ),
     );
   }
 
@@ -36,18 +39,21 @@ class TimeRangeSelector extends StatelessWidget {
     bool isSel = selectedTimeRange == range;
     return ElevatedButton(
       style: ElevatedButton.styleFrom(
-        backgroundColor: isSel ? bitcoinOrange : isDarkMode ? Colors.grey[800]! : Colors.grey[300]!,
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+        backgroundColor: isSel ? bitcoinOrange : Colors.transparent,
+        foregroundColor: isSel ? Colors.black : (isDarkMode ? Colors.white : Colors.black),
+        elevation: 0,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         minimumSize: const Size(0, 36),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: BorderSide(color: isSel ? bitcoinOrange : (isDarkMode ? Colors.white24 : Colors.black26)),
+        ),
       ),
       onPressed: isRefreshing ? null : () => onTimeRangeChanged(range),
-      child: FittedBox(
-        fit: BoxFit.scaleDown,
-        child: Text(
-          timeRangeToString(range),
-          style: TextStyle(color: isSel ? Colors.black : isDarkMode ? Colors.white : Colors.black),
-        ),
+      child: Text(
+        timeRangeToString(range),
+        style: const TextStyle(fontWeight: FontWeight.w600),
       ),
     );
   }
@@ -105,14 +111,14 @@ class _SecuritySettingsDialogState extends State<SecuritySettingsDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final backgroundColor = widget.isDarkMode ? const Color(0xFF2D2D2D) : Colors.white;
+    final backgroundColor = satDialogFill(widget.isDarkMode);
     final textColor = widget.isDarkMode ? Colors.white : Colors.black;
-    final cardColor = widget.isDarkMode ? const Color(0xFF3D3D3D) : Colors.grey.shade50;
-    final borderColor = widget.isDarkMode ? Colors.grey.shade700 : Colors.grey.shade300;
+    final cardColor = widget.isDarkMode ? const Color(0xFF322C28) : const Color(0xFFF3F0EA);
+    final borderColor = widget.isDarkMode ? const Color(0x33F7931A) : const Color(0x1A000000);
 
     return AlertDialog(
       backgroundColor: backgroundColor,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.0)),
+      shape: satDialogShape(widget.isDarkMode),
       contentPadding: const EdgeInsets.all(20),
       content: SingleChildScrollView(
         child: Column(
@@ -120,7 +126,7 @@ class _SecuritySettingsDialogState extends State<SecuritySettingsDialog> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(children: [
-              Icon(Icons.security, color: const Color(0xFFF7931A), size: 24),
+              Icon(Icons.security, color: textColor.withOpacity(0.7), size: 24),
               const SizedBox(width: 12),
               Expanded(child: Text('Security Settings', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: textColor), overflow: TextOverflow.ellipsis)),
             ]),
@@ -144,7 +150,12 @@ class _SecuritySettingsDialogState extends State<SecuritySettingsDialog> {
                 const SizedBox(width: 8),
                 ElevatedButton(
                   onPressed: _saving ? null : _saveSecuritySettings,
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFF7931A), foregroundColor: Colors.black),
+                  style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFF7931A),
+                  foregroundColor: Colors.black,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                ),
                   child: _saving
                       ? const SizedBox(
                           width: 18,
@@ -194,7 +205,7 @@ class _SecuritySettingsDialogState extends State<SecuritySettingsDialog> {
               _obscurePin = true;
               _obscureConfirmPin = true;
             }),
-            dropdownColor: widget.isDarkMode ? const Color(0xFF3D3D3D) : Colors.white,
+            dropdownColor: satDialogFill(widget.isDarkMode),
           ),
         ),
         const SizedBox(height: 16),
@@ -647,7 +658,12 @@ class _LoginScreenState extends State<LoginScreen> {
                   const SizedBox(height: 20),
                   ElevatedButton(
                     onPressed: _resetSecurity,
-                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFF7931A), foregroundColor: Colors.black),
+                    style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFF7931A),
+                  foregroundColor: Colors.black,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                ),
                     child: const Text('Reset Security'),
                   ),
                   TextButton(
@@ -846,9 +862,9 @@ class CompactCurrencyDisplay extends StatelessWidget {
         const SizedBox(width: 8),
         Expanded(child: _buildCurrencyButton(secondaryCurrency)),
         IconButton(
-          icon: const Icon(Icons.more_horiz, size: 28),
+          icon: const Icon(Icons.more_horiz, size: 24),
           onPressed: onSettingsPressed,
-          color: isDarkMode ? Colors.white : Colors.black,
+          color: isDarkMode ? Colors.white70 : Colors.black54,
         ),
       ],
     );
@@ -859,19 +875,18 @@ class CompactCurrencyDisplay extends StatelessWidget {
     final symbol = _getSymbol(currency);
     final isSelected = currency == selectedCurrency;
 
-    return Container(
-      decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), boxShadow: [
-        BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 4, offset: const Offset(0, 2)),
-      ]),
-      child: ElevatedButton(
+    return ElevatedButton(
         style: ElevatedButton.styleFrom(
-          backgroundColor: isSelected ? bitcoinOrange : isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+          backgroundColor: isSelected ? bitcoinOrange : Colors.transparent,
           foregroundColor: isSelected ? Colors.black : (isDarkMode ? Colors.white : Colors.black),
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-          minimumSize: const Size(0, 44),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+          minimumSize: const Size(0, 40),
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: BorderSide(color: isSelected ? bitcoinOrange : (isDarkMode ? Colors.white24 : Colors.black26)),
+          ),
         ),
         onPressed: isRefreshing ? null : () => onCurrencyChanged(currency),
         child: FittedBox(
@@ -884,11 +899,10 @@ class CompactCurrencyDisplay extends StatelessWidget {
               Text(currencyToString(currency),
                   style: TextStyle(fontSize: 16, color: isSelected ? Colors.black : isDarkMode ? Colors.white70 : Colors.black54)),
               const SizedBox(width: 6),
-              Text(price == 0 ? '-' : price.toStringAsFixed(0), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              Text(price == 0 ? '-' : price.toStringAsFixed(0), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, fontFeatures: [FontFeature.tabularFigures()])),
             ],
           ),
         ),
-      ),
     );
   }
 }
@@ -927,14 +941,14 @@ class _CurrencySettingsDialogState extends State<CurrencySettingsDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final backgroundColor = widget.isDarkMode ? const Color(0xFF2D2D2D) : Colors.white;
+    final backgroundColor = satDialogFill(widget.isDarkMode);
     final textColor = widget.isDarkMode ? Colors.white : Colors.black;
-    final cardColor = widget.isDarkMode ? const Color(0xFF3D3D3D) : Colors.grey.shade50;
-    final borderColor = widget.isDarkMode ? Colors.grey.shade700 : Colors.grey.shade300;
+    final cardColor = widget.isDarkMode ? const Color(0xFF322C28) : const Color(0xFFF3F0EA);
+    final borderColor = widget.isDarkMode ? const Color(0x33F7931A) : const Color(0x1A000000);
 
     return AlertDialog(
       backgroundColor: backgroundColor,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.0)),
+      shape: satDialogShape(widget.isDarkMode),
       contentPadding: const EdgeInsets.all(20),
       content: SingleChildScrollView(
         child: Column(
@@ -942,7 +956,7 @@ class _CurrencySettingsDialogState extends State<CurrencySettingsDialog> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(children: [
-            Icon(Icons.currency_exchange, color: const Color(0xFFF7931A), size: 24),
+            Icon(Icons.currency_exchange, color: textColor.withOpacity(0.7), size: 24),
             const SizedBox(width: 12),
             Expanded(child: Text('Currency Settings', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: textColor), overflow: TextOverflow.ellipsis)),
           ]),
@@ -975,7 +989,12 @@ class _CurrencySettingsDialogState extends State<CurrencySettingsDialog> {
                   widget.onSave(_tempFavorite, _tempSecondary, _tempDenomination);
                   Navigator.of(context).pop();
                 },
-                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFF7931A), foregroundColor: Colors.black),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFF7931A),
+                  foregroundColor: Colors.black,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                ),
                 child: const Text('Save'),
               ),
             ],
@@ -1008,7 +1027,7 @@ class _CurrencySettingsDialogState extends State<CurrencySettingsDialog> {
               );
             }).toList(),
             onChanged: onChanged,
-            dropdownColor: widget.isDarkMode ? const Color(0xFF3D3D3D) : Colors.white,
+            dropdownColor: satDialogFill(widget.isDarkMode),
           ),
         ),
       ],

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:clipboard/clipboard.dart';
+import 'surfaces.dart';
 
 class DonationWidget {
   static void showDonationDialog(BuildContext context, bool isDarkMode) {
@@ -48,13 +49,17 @@ class _DonationDialogState extends State<DonationDialog> with SingleTickerProvid
     final screenWidth = mediaQuery.size.width;
     final isSmallScreen = screenHeight < 600 || screenWidth < 350;
 
+    final titleColor = widget.isDarkMode ? Colors.white : Colors.black;
+    final muted = widget.isDarkMode ? Colors.white54 : Colors.black54;
     return Dialog(
-      backgroundColor: widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.0)),
+      backgroundColor: Colors.transparent,
+      elevation: 0,
       insetPadding: const EdgeInsets.all(16.0),
-      child: SizedBox(
+      child: Container(
         height: screenHeight * 0.85,
         width: screenWidth * 0.95,
+        clipBehavior: Clip.antiAlias,
+        decoration: satCard(widget.isDarkMode, hero: true),
         child: Padding(
           padding: const EdgeInsets.all(16.0),
           child: Column(
@@ -70,34 +75,25 @@ class _DonationDialogState extends State<DonationDialog> with SingleTickerProvid
               const SizedBox(height: 16),
 
               // Tab bar with adjusted styling for small screens
-              Container(
-                decoration: BoxDecoration(
-                  color: widget.isDarkMode ? Colors.grey[800] : Colors.grey[200],
-                  borderRadius: BorderRadius.circular(8.0),
+              TabBar(
+                controller: _tabController,
+                indicatorSize: TabBarIndicatorSize.label,
+                indicator: const UnderlineTabIndicator(
+                  borderSide: BorderSide(color: Color(0xFFF7931A), width: 2),
                 ),
-                child: TabBar(
-                  controller: _tabController,
-                  indicator: BoxDecoration(
-                    borderRadius: BorderRadius.circular(8.0),
-                    color: const Color(0xFFF7931A),
-                  ),
-                  labelColor: Colors.black,
-                  unselectedLabelColor: widget.isDarkMode ? Colors.white70 : Colors.black54,
-                  labelStyle: TextStyle(
-                    fontSize: isSmallScreen ? 11 : 14,
-                    fontWeight: FontWeight.w600,
-                  ),
-                  unselectedLabelStyle: TextStyle(
-                    fontSize: isSmallScreen ? 11 : 14,
-                  ),
-                  labelPadding: const EdgeInsets.symmetric(horizontal: 8),
-                  indicatorSize: TabBarIndicatorSize.tab,
-                  tabs: const [
-                    Tab(text: 'Lightning'),
-                    Tab(text: 'QR Code'),
-                    Tab(text: 'On-Chain'),
-                  ],
+                dividerColor: Colors.transparent,
+                labelColor: titleColor,
+                unselectedLabelColor: muted,
+                labelStyle: TextStyle(
+                  fontSize: isSmallScreen ? 12 : 14,
+                  fontWeight: FontWeight.w600,
                 ),
+                unselectedLabelStyle: TextStyle(fontSize: isSmallScreen ? 12 : 14),
+                tabs: const [
+                  Tab(text: 'Lightning'),
+                  Tab(text: 'QR Code'),
+                  Tab(text: 'On-Chain'),
+                ],
               ),
               const SizedBox(height: 16),
 
@@ -127,8 +123,9 @@ class _DonationDialogState extends State<DonationDialog> with SingleTickerProvid
                       horizontal: 24,
                       vertical: isSmallScreen ? 12 : 16,
                     ),
+                    elevation: 0,
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(16),
                     ),
                   ),
                   child: Text(
@@ -176,10 +173,12 @@ class _DonationDialogState extends State<DonationDialog> with SingleTickerProvid
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFFF7931A),
                 foregroundColor: Colors.black,
+                elevation: 0,
                 padding: EdgeInsets.symmetric(
                   horizontal: 16,
                   vertical: isSmallScreen ? 12 : 16,
                 ),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               ),
               child: Text(
                 'Open in Wallet',
@@ -268,10 +267,12 @@ class _DonationDialogState extends State<DonationDialog> with SingleTickerProvid
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFFF7931A),
                 foregroundColor: Colors.black,
+                elevation: 0,
                 padding: EdgeInsets.symmetric(
                   horizontal: 16,
                   vertical: isSmallScreen ? 12 : 16,
                 ),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               ),
               child: Text(
                 'Copy Address',
@@ -298,13 +299,13 @@ class _DonationDialogState extends State<DonationDialog> with SingleTickerProvid
   }) {
     return Container(
       decoration: BoxDecoration(
-        color: widget.isDarkMode ? Colors.grey[800] : Colors.grey[100],
-        borderRadius: BorderRadius.circular(8.0),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: widget.isDarkMode ? Colors.white12 : Colors.black12),
       ),
       padding: const EdgeInsets.all(12.0),
       child: Row(
         children: [
-          Icon(icon, color: const Color(0xFFF7931A), size: isSmallScreen ? 20 : 24),
+          Icon(icon, color: widget.isDarkMode ? Colors.white54 : Colors.black45, size: isSmallScreen ? 20 : 24),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -356,32 +357,18 @@ class _DonationDialogState extends State<DonationDialog> with SingleTickerProvid
   }
 
   Widget _buildThankYouNote(bool isSmallScreen) {
-    return Container(
-      padding: const EdgeInsets.all(12.0),
-      decoration: BoxDecoration(
-        color: widget.isDarkMode
-            ? Colors.orange.withOpacity(0.1)
-            : Colors.orange.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(8.0),
-        border: Border.all(
-          color: const Color(0xFFF7931A).withOpacity(0.3),
-          width: 1,
-        ),
-      ),
-      child: Text(
+    return Text(
         'Thank you for choosing SatStack to map your journey towards financial sovereignty. '
             'As a solo developer building for the Bitcoin community, '
             'I created this app to empower users to track their stacking progress. '
             'Every Satoshi helps keep this project free, private, and constantly improving. '
             'Thank you for supporting independent Bitcoin development.',
         style: TextStyle(
-          color: widget.isDarkMode ? Colors.orange[100] : Colors.orange[900],
+          color: widget.isDarkMode ? Colors.white60 : Colors.black54,
           fontSize: isSmallScreen ? 12 : 14,
-          fontWeight: FontWeight.w500,
-          height: 1.4,
+          height: 1.45,
         ),
         textAlign: TextAlign.center,
-      ),
     );
   }
 }

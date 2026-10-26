@@ -18,6 +18,7 @@ import 'services.dart';
 import 'security_service.dart';
 import 'donation_widget.dart';
 import 'import_export_widget.dart';
+import 'surfaces.dart';
 // ADDED: Import for URL launcher
 import 'package:url_launcher/url_launcher.dart';
 
@@ -380,8 +381,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     final picked = await showDatePicker(context: context, initialDate: appState.selectedDate, firstDate: DateTime(2010), lastDate: DateTime.now(),
         builder: (c, child) => Theme(
           data: appState.isDarkMode ? ThemeData.dark().copyWith(
-            colorScheme: const ColorScheme.dark(primary: Color(0xFFF7931A), onPrimary: Colors.black, surface: Color(0xFF1E1E1E), onSurface: Colors.white),
-            dialogBackgroundColor: const Color(0xFF121212),
+            colorScheme: const ColorScheme.dark(primary: Color(0xFFF7931A), onPrimary: Colors.black, surface: Color(0xFF241F1C), onSurface: Colors.white),
+            dialogBackgroundColor: const Color(0xFF241F1C),
           ) : ThemeData.light().copyWith(
             colorScheme: ColorScheme.light(primary: const Color(0xFFF7931A), onPrimary: Colors.black, surface: Colors.grey[200]!, onSurface: Colors.black),
             dialogBackgroundColor: Colors.grey[100],
@@ -445,7 +446,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
           ),
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert),
-            color: appState.isDarkMode ? const Color(0xFF2D2D2D) : Colors.white,
+            color: satDialogFill(appState.isDarkMode),
             surfaceTintColor: Colors.transparent,
             elevation: 8,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -498,13 +499,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
         ],
       ),
       body: Padding(padding: EdgeInsets.only(bottom: bottomPadding), child: Column(children: [
-        Container(decoration: BoxDecoration(color: appState.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white, boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 2, offset: const Offset(0, 1))]),
-          child: Column(children: [
-            Container(height: 1, color: appState.isDarkMode ? Colors.grey[800] : Colors.grey[300]),
-            TabBar(controller: _tabController, indicator: const BoxDecoration(), labelColor: const Color(0xFFF7931A), unselectedLabelColor: appState.isDarkMode ? Colors.white54 : Colors.black54,
-              labelStyle: TextStyle(fontWeight: FontWeight.w600, fontSize: isSmallScreen ? 12 : 14), tabs: const [Tab(text: 'Overview'), Tab(text: 'Portfolio'), Tab(text: 'Transactions')],
-            ),
-          ]),
+        Container(
+          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: appState.isDarkMode ? Colors.white12 : Colors.black12))),
+          child: TabBar(
+            controller: _tabController,
+            indicatorSize: TabBarIndicatorSize.label,
+            indicator: const UnderlineTabIndicator(borderSide: BorderSide(color: Color(0xFFF7931A), width: 2)),
+            dividerColor: Colors.transparent,
+            labelColor: appState.isDarkMode ? Colors.white : Colors.black,
+            unselectedLabelColor: appState.isDarkMode ? Colors.white54 : Colors.black54,
+            labelStyle: TextStyle(fontWeight: FontWeight.w600, fontSize: isSmallScreen ? 12 : 14),
+            tabs: const [Tab(text: 'Overview'), Tab(text: 'Portfolio'), Tab(text: 'Transactions')],
+          ),
         ),
         Expanded(child: TabBarView(controller: _tabController, children: [_buildOverviewTab(appState), _buildPortfolioTab(appState), _buildTransactionsTabCompact(appState)])),
       ])),
@@ -566,6 +572,25 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
     );
   }
 
+  Widget _modePill(AppState appState, String label, bool purchase) {
+    final selected = _isPurchaseMode == purchase;
+    final muted = appState.isDarkMode ? Colors.white70 : Colors.black54;
+    return ElevatedButton(
+      onPressed: () => setState(() => _isPurchaseMode = purchase),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: selected ? const Color(0xFFF7931A) : Colors.transparent,
+        foregroundColor: selected ? Colors.black : muted,
+        elevation: 0,
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: selected ? const Color(0xFFF7931A) : (appState.isDarkMode ? Colors.white24 : Colors.black26)),
+        ),
+      ),
+      child: Text(label, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+    );
+  }
+
   // COMPACT TRANSACTIONS TAB
   Widget _buildTransactionsTabCompact(AppState appState) {
     final screenWidth = MediaQuery.of(context).size.width;
@@ -593,77 +618,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
 
           const SizedBox(height: 16),
 
-          // Transaction type toggle with proper text
-          Container(
-            margin: const EdgeInsets.only(bottom: 16),
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: appState.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
-              borderRadius: BorderRadius.circular(10),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 4,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16),
             child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: () => setState(() => _isPurchaseMode = true),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _isPurchaseMode ? Colors.green : Colors.transparent,
-                      foregroundColor: _isPurchaseMode ? Colors.white : (appState.isDarkMode ? Colors.white70 : Colors.black54),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        side: BorderSide(
-                          color: _isPurchaseMode ? Colors.green : (appState.isDarkMode ? Colors.grey[700]! : Colors.grey[300]!),
-                          width: 2,
-                        ),
-                      ),
-                      elevation: 0,
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.add_shopping_cart, size: 18),
-                        const SizedBox(width: 6),
-                        Text('Buy', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-                      ],
-                    ),
-                  ),
-                ),
+                Expanded(child: _modePill(appState, 'Buy', true)),
                 const SizedBox(width: 8),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: () => setState(() => _isPurchaseMode = false),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: !_isPurchaseMode ? Colors.red : Colors.transparent,
-                      foregroundColor: !_isPurchaseMode ? Colors.white : (appState.isDarkMode ? Colors.white70 : Colors.black54),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        side: BorderSide(
-                          color: !_isPurchaseMode ? Colors.red : (appState.isDarkMode ? Colors.grey[700]! : Colors.grey[300]!),
-                          width: 2,
-                        ),
-                      ),
-                      elevation: 0,
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.remove_shopping_cart, size: 18),
-                        const SizedBox(width: 6),
-                        Text('Sell', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-                      ],
-                    ),
-                  ),
-                ),
+                Expanded(child: _modePill(appState, 'Sell', false)),
               ],
             ),
           ),
@@ -672,17 +633,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
           Container(
             padding: const EdgeInsets.all(12),
             margin: const EdgeInsets.only(bottom: 16),
-            decoration: BoxDecoration(
-              color: appState.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
-              borderRadius: BorderRadius.circular(10),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 6,
-                  offset: const Offset(0, 3),
-                ),
-              ],
-            ),
+            decoration: satCard(appState.isDarkMode),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -804,16 +755,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
                           const SizedBox(height: 4),
                           SizedBox(
                             width: double.infinity,
-                            child: ElevatedButton.icon(
+                            child: OutlinedButton.icon(
                               onPressed: () => _pickDate(appState),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFFF7931A), // Bitcoin orange
-                                foregroundColor: Colors.black,
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                elevation: 2,
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: appState.isDarkMode ? Colors.white : Colors.black,
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                                side: BorderSide(color: appState.isDarkMode ? Colors.white24 : Colors.black26),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                               ),
                               icon: const Icon(Icons.calendar_today, size: 16),
                               label: FittedBox(
@@ -841,12 +789,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
                             child: ElevatedButton.icon(
                               onPressed: () => _addTransaction(appState), // now async
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: _isPurchaseMode ? Colors.green : Colors.red,
-                                foregroundColor: Colors.white,
+                                backgroundColor: const Color(0xFFF7931A),
+                                foregroundColor: Colors.black,
+                                elevation: 0,
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                               ),
                               icon: Icon(
                                 _isPurchaseMode ? Icons.add_shopping_cart : Icons.remove_shopping_cart,
@@ -871,24 +818,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
           ),
 
           // Calendar section - simplified without title
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: appState.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
-              borderRadius: BorderRadius.circular(10),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 6,
-                  offset: const Offset(0, 3),
-                ),
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // PurchaseCalendar widget directly without title
-                PurchaseCalendar(
+          PurchaseCalendar(
                   purchases: appState.purchases,
                   sales: appState.sales,
                   onDateSelected: (date) => appState.setSelectedDate(date),
@@ -903,9 +833,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
                   denomination: appState.denomination,
                   btcPrices: appState.btcPrices,
                   holdingsHidden: appState.holdingsHidden,
-                ),
-              ],
-            ),
           ),
 
           // Quick stats
@@ -913,17 +840,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
             const SizedBox(height: 16),
             Container(
               padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: appState.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
-                borderRadius: BorderRadius.circular(10),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
-                    blurRadius: 6,
-                    offset: const Offset(0, 3),
-                  ),
-                ],
-              ),
+              decoration: satCard(appState.isDarkMode),
               child: Row(
                 children: [
                   Expanded(
@@ -952,7 +869,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
                   Container(
                     height: 30,
                     width: 1,
-                    color: appState.isDarkMode ? Colors.grey[700] : Colors.grey[300],
+                    color: satHairline(appState.isDarkMode),
                   ),
                   Expanded(
                     child: Column(
@@ -981,7 +898,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
                   Container(
                     height: 30,
                     width: 1,
-                    color: appState.isDarkMode ? Colors.grey[700] : Colors.grey[300],
+                    color: satHairline(appState.isDarkMode),
                   ),
                   Expanded(
                     child: Column(
@@ -1028,55 +945,61 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   }
 
   Widget _buildPortfolioGrid(AppState appState) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isSmallScreen = screenWidth < 400;
-    if (screenWidth < 600) return GridView.count(crossAxisCount: 2, childAspectRatio: isSmallScreen ? 1.1 : 1.2, shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
-        padding: EdgeInsets.all(isSmallScreen ? 8 : 12), mainAxisSpacing: isSmallScreen ? 8 : 12, crossAxisSpacing: isSmallScreen ? 8 : 12, children: [
-          _buildPortfolioCard(context: context, title: 'BTC Holdings', value: appState.formatBtcAmount(appState.totalBTC), subtitle: 'Total Bitcoin', icon: Icons.account_balance_wallet,
-              isDarkMode: appState.isDarkMode, valueColor: const Color(0xFFF7931A), appState: appState),
-          _buildPortfolioCard(context: context, title: 'Total Investment', value: appState.totalInvestment == 0 ? '-' : appState.formatSensitiveValue(appState.totalInvestment, currency: currencyToString(appState.selectedCurrency)),
-              subtitle: 'Total Cash Spent', icon: Icons.attach_money, isDarkMode: appState.isDarkMode, valueColor: appState.isDarkMode ? Colors.white : Colors.black, appState: appState),
-          _buildPortfolioCard(context: context, title: 'Current Value', value: appState.portfolioValue == 0 ? '-' : appState.formatSensitiveValue(appState.portfolioValue, currency: currencyToString(appState.selectedCurrency)),
-              subtitle: 'Portfolio Value', icon: Icons.trending_up, isDarkMode: appState.isDarkMode, valueColor: appState.profitLoss >= 0 ? Colors.green : Colors.red, appState: appState),
-          _buildPortfolioCard(context: context, title: 'P&L', value: appState.formatSensitiveValue(appState.profitLoss, currency: currencyToString(appState.selectedCurrency)),
-              subtitle: appState.formatSensitivePercentage(appState.profitLossPercentage), icon: Icons.bar_chart, isDarkMode: appState.isDarkMode,
-              valueColor: appState.profitLoss >= 0 ? Colors.green : Colors.red, appState: appState),
-        ]);
-    else return SizedBox(height: 140, child: ListView(scrollDirection: Axis.horizontal, children: [
-      SizedBox(width: isSmallScreen ? 8 : 16), _buildPortfolioCard(context: context, title: 'BTC Holdings', value: appState.formatBtcAmount(appState.totalBTC), subtitle: 'Total Bitcoin', icon: Icons.account_balance_wallet,
-          isDarkMode: appState.isDarkMode, valueColor: const Color(0xFFF7931A), appState: appState),
-      SizedBox(width: isSmallScreen ? 8 : 12), _buildPortfolioCard(context: context, title: 'Total Investment', value: appState.totalInvestment == 0 ? '-' : appState.formatSensitiveValue(appState.totalInvestment, currency: currencyToString(appState.selectedCurrency)),
-          subtitle: 'Total Cash Spent', icon: Icons.attach_money, isDarkMode: appState.isDarkMode, valueColor: appState.isDarkMode ? Colors.white : Colors.black, appState: appState),
-      SizedBox(width: isSmallScreen ? 8 : 12), _buildPortfolioCard(context: context, title: 'Current Value', value: appState.portfolioValue == 0 ? '-' : appState.formatSensitiveValue(appState.portfolioValue, currency: currencyToString(appState.selectedCurrency)),
-          subtitle: 'Portfolio Value', icon: Icons.trending_up, isDarkMode: appState.isDarkMode, valueColor: appState.profitLoss >= 0 ? Colors.green : Colors.red, appState: appState),
-      SizedBox(width: isSmallScreen ? 8 : 12), _buildPortfolioCard(context: context, title: 'P&L', value: appState.formatSensitiveValue(appState.profitLoss, currency: currencyToString(appState.selectedCurrency)),
-          subtitle: appState.formatSensitivePercentage(appState.profitLossPercentage), icon: Icons.bar_chart, isDarkMode: appState.isDarkMode,
-          valueColor: appState.profitLoss >= 0 ? Colors.green : Colors.red, appState: appState),
-      SizedBox(width: isSmallScreen ? 8 : 16),
-    ]));
+    final dark = appState.isDarkMode;
+    final hair = satHairline(dark);
+    final currency = currencyToString(appState.selectedCurrency);
+    final gain = appState.profitLoss >= 0 ? Colors.green : Colors.red;
+    final facts = [
+      _portfolioFact(dark: dark, icon: Icons.currency_bitcoin, accent: const Color(0xFFF7931A), title: 'BTC Holdings', value: appState.formatBtcAmount(appState.totalBTC), valueColor: const Color(0xFFF7931A), subtitle: 'Total Bitcoin'),
+      _portfolioFact(dark: dark, icon: Icons.payments_outlined, accent: dark ? Colors.white70 : Colors.black54, title: 'Total Investment', value: appState.totalInvestment == 0 ? '-' : appState.formatSensitiveValue(appState.totalInvestment, currency: currency), valueColor: dark ? Colors.white : Colors.black, subtitle: 'Total Cash Spent'),
+      _portfolioFact(dark: dark, icon: appState.profitLoss >= 0 ? Icons.trending_up : Icons.trending_down, accent: gain, title: 'Current Value', value: appState.portfolioValue == 0 ? '-' : appState.formatSensitiveValue(appState.portfolioValue, currency: currency), valueColor: gain, subtitle: 'Portfolio Value'),
+      _portfolioFact(dark: dark, icon: Icons.bar_chart, accent: gain, title: 'P&L', value: appState.formatSensitiveValue(appState.profitLoss, currency: currency), valueColor: gain, subtitle: appState.formatSensitivePercentage(appState.profitLossPercentage)),
+    ];
+    final narrow = MediaQuery.of(context).size.width < 600;
+    Widget line() => Container(width: 1, color: hair);
+    return Container(
+      decoration: satCard(dark),
+      clipBehavior: Clip.antiAlias,
+      child: narrow
+          ? Column(children: [
+              IntrinsicHeight(child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [Expanded(child: facts[0]), line(), Expanded(child: facts[1])])),
+              Container(height: 1, color: hair),
+              IntrinsicHeight(child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [Expanded(child: facts[2]), line(), Expanded(child: facts[3])])),
+            ])
+          : IntrinsicHeight(child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Expanded(child: facts[0]), line(), Expanded(child: facts[1]), line(), Expanded(child: facts[2]), line(), Expanded(child: facts[3]),
+            ])),
+    );
   }
 
-  Widget _buildPortfolioCard({required BuildContext context, required String title, required String value, required String subtitle, required IconData icon, required bool isDarkMode, required AppState appState, Color valueColor = Colors.white}) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isSmallScreen = screenWidth < 400;
-    return Container(width: isSmallScreen ? 150 : 160, decoration: BoxDecoration(color: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white, borderRadius: BorderRadius.circular(16),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 10, offset: const Offset(0, 4))], border: Border.all(color: isDarkMode ? Colors.grey[800]! : Colors.grey[200]!, width: 1)),
-      padding: EdgeInsets.all(isSmallScreen ? 12 : 16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          Icon(icon, color: const Color(0xFFF7931A), size: isSmallScreen ? 18 : 20),
-          Flexible(child: Text(title, style: TextStyle(fontSize: isSmallScreen ? 11 : 12, fontWeight: FontWeight.w600, color: isDarkMode ? Colors.white70 : Colors.black54), overflow: TextOverflow.ellipsis)),
-        ]), SizedBox(height: isSmallScreen ? 6 : 8),
-        Text(value, style: TextStyle(fontSize: isSmallScreen ? 16 : 18, fontWeight: FontWeight.bold, color: valueColor), overflow: TextOverflow.ellipsis, maxLines: 2),
-        SizedBox(height: isSmallScreen ? 2 : 4), Text(subtitle, style: TextStyle(fontSize: isSmallScreen ? 10 : 11, color: isDarkMode ? Colors.white54 : Colors.black54)),
+  Widget _portfolioFact({required bool dark, required IconData icon, required Color accent, required String title, required String value, required Color valueColor, required String subtitle}) {
+    final muted = dark ? Colors.white54 : Colors.black54;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 14, 12, 14),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Container(
+            width: 26,
+            height: 26,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(color: accent.withOpacity(0.14), shape: BoxShape.circle),
+            child: Icon(icon, size: 15, color: accent),
+          ),
+          const SizedBox(width: 8),
+          Expanded(child: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: dark ? Colors.white70 : Colors.black54))),
+        ]),
+        const SizedBox(height: 10),
+        Text(value, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: valueColor, fontFeatures: const [FontFeature.tabularFigures()])),
+        const SizedBox(height: 2),
+        Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, color: muted)),
       ]),
     );
   }
 
   Widget _buildPortfolioDetails(AppState appState) {
-    return Container(width: double.infinity, decoration: BoxDecoration(color: appState.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white, borderRadius: BorderRadius.circular(12),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 10, offset: const Offset(0, 4))]), padding: const EdgeInsets.all(16),
+    return Container(width: double.infinity, decoration: satCard(appState.isDarkMode), padding: const EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [const Icon(Icons.analytics, color: Color(0xFFF7931A), size: 20), const SizedBox(width: 8),
+        Row(children: [Icon(Icons.analytics, color: appState.isDarkMode ? Colors.white54 : Colors.black45, size: 20), const SizedBox(width: 8),
           Expanded(child: Text('Portfolio Details', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: appState.isDarkMode ? Colors.white : Colors.black), overflow: TextOverflow.ellipsis))]),
         const SizedBox(height: 16),
         _buildPortfolioDetailRow('Total Investment', appState.totalInvestment == 0 ? '-' : appState.formatSensitiveValue(appState.totalInvestment, currency: currencyToString(appState.selectedCurrency)), appState.isDarkMode),
@@ -1091,7 +1014,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
 
   Widget _buildPortfolioDetailRow(String label, String value, bool isDarkMode, {Color? valueColor}) {
     final defaultColor = isDarkMode ? Colors.white : Colors.black;
-    return Container(padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12), decoration: BoxDecoration(border: Border(bottom: BorderSide(color: isDarkMode ? Colors.grey[800]! : Colors.grey[200]!, width: 1))),
+    return Container(padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4), decoration: BoxDecoration(border: Border(bottom: BorderSide(color: satHairline(isDarkMode)))),
       child: Row(children: [
         Expanded(child: Text(label, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: isDarkMode ? Colors.white70 : Colors.black54), overflow: TextOverflow.ellipsis)),
         const SizedBox(width: 8),
@@ -1150,24 +1073,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
 
     return Container(
       width: double.infinity,
-      decoration: BoxDecoration(
-        color: appState.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
+      decoration: satCard(appState.isDarkMode),
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(Icons.pie_chart, color: Color(0xFFF7931A), size: 20),
+              Icon(Icons.pie_chart, color: appState.isDarkMode ? Colors.white54 : Colors.black45, size: 20),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -1509,10 +1422,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   }
 
   Widget _buildPerformanceMetrics(AppState appState) {
-    return Container(width: double.infinity, decoration: BoxDecoration(color: appState.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white, borderRadius: BorderRadius.circular(12),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 10, offset: const Offset(0, 4))]), padding: const EdgeInsets.all(16),
+    return Container(width: double.infinity, decoration: satCard(appState.isDarkMode), padding: const EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [const Icon(Icons.leaderboard, color: Color(0xFFF7931A), size: 20), const SizedBox(width: 8),
+        Row(children: [Icon(Icons.leaderboard, color: appState.isDarkMode ? Colors.white54 : Colors.black45, size: 20), const SizedBox(width: 8),
           Expanded(child: Text('Performance Metrics', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: appState.isDarkMode ? Colors.white : Colors.black), overflow: TextOverflow.ellipsis))]),
         const SizedBox(height: 16),
         _buildMetricRow('ROI', appState.formatSensitivePercentage(appState.profitLossPercentage), appState.profitLossPercentage >= 0, appState.isDarkMode),
@@ -1525,7 +1437,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   }
 
   Widget _buildMetricRow(String label, String value, bool isPositive, bool isDarkMode) {
-    return Container(padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12), decoration: BoxDecoration(border: Border(bottom: BorderSide(color: isDarkMode ? Colors.grey[800]! : Colors.grey[200]!, width: 1))),
+    return Container(padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4), decoration: BoxDecoration(border: Border(bottom: BorderSide(color: satHairline(isDarkMode)))),
       child: Row(children: [
         Expanded(child: Text(label, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: isDarkMode ? Colors.white54 : Colors.black54), overflow: TextOverflow.ellipsis)),
         const SizedBox(width: 8),
